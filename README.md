@@ -86,6 +86,21 @@ npm run bot
 
 Allowlisted users run `/start` to write into `data/users.json`. The worker reads that file for fan-out. The bot does not process race data.
 
+### Starship HITL (Flight 13-style replay)
+
+Operator marks moments while watching a webcast. Script times are nominal references only.
+
+```bash
+# CLI keys (interactive terminal)
+npm run starship:ops
+
+# Telegram buttons (allowlisted master account)
+TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id npm run starship:bot
+# then: /ops
+```
+
+Press **0** (CLI) or **Liftoff** (Telegram) at T+0 on the stream; remaining keys/buttons fire cues with live T+. Optional Δ vs published script is shown when available.
+
 ---
 
 ## Configuration

@@ -5,14 +5,16 @@
 import { loadConfig } from "./config.js";
 import { createGate } from "./gate.js";
 import { createF1Domain } from "./domains/f1/index.js";
+import { createStarshipDomain } from "./domains/starship/index.js";
 
 /**
  * @param {string} name
  */
 function loadDomain(name) {
   if (name === "f1") return createF1Domain();
+  if (name === "starship") return createStarshipDomain();
   throw new Error(
-    `Unknown domain "${name}". Only "f1" is registered (add domains/<name>).`,
+    `Unknown domain "${name}". Registered: f1, starship.`,
   );
 }
 
