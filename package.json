@@ -1,0 +1,50 @@
+{
+  "name": "cue",
+  "version": "0.1.0",
+  "description": "Real-time sparse event alerts from live streams (F1 domain included)",
+  "type": "module",
+  "license": "MIT",
+  "author": "datadr1ven",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/datadr1ven/cue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/datadr1ven/cue/issues"
+  },
+  "homepage": "https://github.com/datadr1ven/cue#readme",
+  "keywords": [
+    "alerts",
+    "realtime",
+    "mqtt",
+    "telegram",
+    "f1",
+    "openf1",
+    "events"
+  ],
+  "bin": {
+    "cue-replay": "./bin/replay.js",
+    "cue-worker": "./bin/worker.js",
+    "cue-bot": "./bin/bot.js",
+    "cue-publish": "./bin/publish-ndjson.js"
+  },
+  "scripts": {
+    "replay": "node bin/replay.js",
+    "worker": "node bin/worker.js",
+    "worker:live:log": "MQTT_SOURCE=live DELIVERY_MODE=log node bin/worker.js",
+    "worker:live": "MQTT_SOURCE=live DELIVERY_MODE=telegram node bin/worker.js",
+    "worker:local:log": "MQTT_SOURCE=local DELIVERY_MODE=log node bin/worker.js",
+    "bot": "node bin/bot.js",
+    "publish": "node bin/publish-ndjson.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "byline": "^5.0.0",
+    "dotenv": "^17.3.1",
+    "mqtt": "^5.15.0",
+    "telegraf": "^4.16.0"
+  }
+}
