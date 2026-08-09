@@ -1,0 +1,23 @@
+{
+  "missionId": "starship-flight-12",
+  "missionName": "Starship Flight 12",
+  "source": "https://www.spacex.com/launches/starship-flight-12",
+  "notes": "Nominal T+ from SpaceX Flight 12 page (approximate). Pad 2 / V3 debut. No tower catch planned—booster Gulf splashdown; ship Indian Ocean. Press on video truth; Δ vs script is a hint only.",
+  "launchApproxUtc": "2026-05-22T22:30:00Z",
+  "script": [
+    { "tPlusSec": 0, "actionId": "liftoff", "label": "Liftoff" },
+    { "tPlusSec": 45, "actionId": "max_q", "label": "Max Q" },
+    { "tPlusSec": 142, "actionId": "meco", "label": "Super Heavy MECO" },
+    { "tPlusSec": 144, "actionId": "hot_stage", "label": "Hot-staging" },
+    { "tPlusSec": 150, "actionId": "boostback_start", "label": "Boostback start" },
+    { "tPlusSec": 210, "actionId": "boostback_end", "label": "Boostback end" },
+    { "tPlusSec": 394, "actionId": "landing_burn_booster", "label": "Booster landing burn" },
+    { "tPlusSec": 419, "actionId": "booster_splash", "label": "Booster splashdown" },
+    { "tPlusSec": 491, "actionId": "seco", "label": "Ship SECO" },
+    { "tPlusSec": 1057, "actionId": "deploy_start", "label": "Payload deploy start" },
+    { "tPlusSec": 1635, "actionId": "deploy_done", "label": "Payload deploy complete" },
+    { "tPlusSec": 2850, "actionId": "entry", "label": "Entry" },
+    { "tPlusSec": 3900, "actionId": "landing_burn_ship", "label": "Ship landing burn" },
+    { "tPlusSec": 3920, "actionId": "ship_splash", "label": "Ship splashdown" }
+  ]
+}

@@ -1,32 +1,55 @@
 # Cue
 
-**Real-time alerts from live event streams — high signal, low volume.**
+**Sparse real-time alerts from timed event streams.**
 
-Cue ingests structured event data, maintains a compact situation snapshot, detects discrete **moments** (safety car, lead change, pit under VSC, chequered flag, …), and emits short template-rendered alerts. An F1 domain (OpenF1 MQTT / NDJSON) ships in-tree. The pipeline is domain-pluggable.
+Cue turns a firehose of structured events into a small set of high-severity **moments**, then renders short template messages for log or Telegram delivery. Sources and domains are pluggable; the core is a single pipeline:
+
+**normalize → reduce snapshot → detect moments → gate → render → deliver**
 
 **License:** MIT  
 **Author:** [datadr1ven](https://github.com/datadr1ven)
 
 ---
 
+## What it is
+
+| Layer | Responsibility |
+|--------|----------------|
+| **Ingest** | Map external records into a common event shape (`type`, `t`, `payload`) |
+| **Domain** | Domain-specific state reduction and moment detection |
+| **Gate** | Severity floor, dedupe, cooldowns |
+| **Render** | Templates by default (no LLM required) |
+| **Deliver** | `log` \| `telegram` \| `none` |
+
+Reference domains in this repository:
+
+| Domain | Primary inputs | Operator path |
+|--------|----------------|---------------|
+| **`f1`** | OpenF1-shaped MQTT / NDJSON | MQTT worker + offline replay |
+| **`starship`** | Manual inject (+ nominal mission script) | CLI keys or Telegram `/ops` |
+
+Downstream apps can brand separately and run one Cue worker instance per domain.
+
+---
+
 ## Features
 
-- **Moment pipeline** — normalize → reduce state → detect → gate (severity / dedupe) → render  
-- **Template output by default** — no LLM required  
-- **OpenF1 adapter** — live MQTT and offline NDJSON captures  
-- **Lean subscriptions** — race control, position, pit, stints, drivers, weather, team radio (not location / car_data / lap firehose)  
-- **Delivery modes** — Telegram, log, or none  
-- **Local replay** — file → stdout, or file → MQTT broker → worker  
-- **Minimal Telegram bot** — allowlisted `/start` enrollment to a JSON subscriber file  
+- Domain-pluggable moment pipeline with shared gate and delivery  
+- Template rendering; optional LLM hook exists but is off by default  
+- Explicit runtime posture (`MQTT_SOURCE`, `DELIVERY_MODE`) — no silent defaults  
+- Offline file replay for regression and evaluation  
+- Local MQTT publish path for capture-driven integration tests  
+- Minimal allowlisted Telegram enrollment (`data/users.json`)  
+- Human-in-the-loop inject for domains without a public machine feed  
 
 ---
 
 ## Requirements
 
 - Node.js 18+  
-- For live OpenF1 MQTT: OpenF1 credentials  
-- For Telegram delivery: a bot token  
-- For local MQTT loops: a broker (e.g. Mosquitto) on `localhost:1883`  
+- Telegram bot token when using Telegram delivery or bots  
+- MQTT broker for local worker loops (e.g. Mosquitto)  
+- Upstream credentials only when using a live feed that requires them (e.g. OpenF1 for `f1` + `MQTT_SOURCE=live`)  
 
 ---
 
@@ -43,63 +66,68 @@ npm install
 
 ## Usage
 
-### Offline replay (no broker, no Telegram)
+### Offline replay (file → stdout)
+
+OpenF1-style NDJSON through the **`f1`** domain:
 
 ```bash
-npm run replay -- path/to/session.ndjson
-npm run replay -- path/to/session.ndjson --min-severity 7
-npm run replay -- path/to/session.ndjson --radios
-npm run replay -- path/to/session.ndjson --json
+npm run replay -- path/to/capture.ndjson
+npm run replay -- path/to/capture.ndjson --min-severity 7
+npm run replay -- path/to/capture.ndjson --json
 ```
 
-### Worker (MQTT → alerts)
+### MQTT worker (stream → deliver)
 
-`MQTT_SOURCE` and `DELIVERY_MODE` are required (no silent defaults).
+Requires `MQTT_SOURCE` and `DELIVERY_MODE`.
 
 | Command | MQTT | Delivery |
 |---------|------|----------|
 | `npm run worker:local:log` | local broker | log |
-| `npm run worker:live:log` | OpenF1 live | log |
-| `npm run worker:live` | OpenF1 live | Telegram |
+| `npm run worker:live:log` | configured live host | log |
+| `npm run worker:live` | configured live host | Telegram |
 
 ```bash
 MQTT_SOURCE=local DELIVERY_MODE=log npm run worker
 ```
 
+Default domain is `f1` (`ENGINE_DOMAIN`). Lean topic subscriptions are defined in the MQTT worker for that domain.
+
 ### Publish NDJSON to a local broker
 
 ```bash
-# Terminal A: mosquitto
-# Terminal B: worker:local:log
+# Terminal A: broker
+# Terminal B: npm run worker:local:log
 # Terminal C:
-npm run publish -- path/to/session.ndjson max
-npm run publish -- path/to/session.ndjson respect 10
+npm run publish -- path/to/capture.ndjson max
+npm run publish -- path/to/capture.ndjson respect 10
 ```
 
-`max` publishes as fast as possible; `respect` preserves capture timing (optional speed multiplier).
+`max` — as fast as possible · `respect` — wall timing from capture timestamps (optional speed multiplier).
 
-### Telegram bot (enrollment)
+### Telegram enrollment
 
 ```bash
 npm run bot
 ```
 
-Allowlisted users run `/start` to write into `data/users.json`. The worker reads that file for fan-out. The bot does not process race data.
+Allowlisted users: `/start` appends to `data/users.json`. The worker fans out alerts to that list. Enrollment is separate from domain logic.
 
-### Starship HITL (Flight 13-style replay)
+### Manual inject (Starship reference domain)
 
-Operator marks moments while watching a webcast. Script times are nominal references only.
+For streams without a public event bus, operators mark moments while watching an external source (e.g. a webcast). Mission scripts supply nominal T+ labels and Δ hints only; presses are ground truth.
 
 ```bash
-# CLI keys (interactive terminal)
+# CLI
 npm run starship:ops
+npm run starship:ops -- --script examples/starship-flight-12-script.json
 
-# Telegram buttons (allowlisted master account)
+# Telegram ops (allowlist)
 TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id npm run starship:bot
-# then: /ops
+STARSHIP_SCRIPT=examples/starship-flight-12-script.json npm run starship:bot
+# /ops — inline buttons
 ```
 
-Press **0** (CLI) or **Liftoff** (Telegram) at T+0 on the stream; remaining keys/buttons fire cues with live T+. Optional Δ vs published script is shown when available.
+Example scripts: `examples/starship-flight-*.json`. Copy and edit for additional missions (`missionId`, `missionName`, `script[]`).
 
 ---
 
@@ -112,79 +140,76 @@ See [`.env.example`](./.env.example).
 | `MQTT_SOURCE` | `live` \| `local` |
 | `DELIVERY_MODE` | `telegram` \| `log` \| `none` |
 | `TELEGRAM_TOKEN` | Bot API token |
-| `TELEGRAM_ALLOWLIST` | Comma-separated numeric chat ids (delivery + `/start`) |
+| `TELEGRAM_ALLOWLIST` | Comma-separated chat ids (delivery + enrollment + ops) |
 | `SUBSCRIBER_IDS` | Optional seed subscriber ids |
-| `OPENF1_USERNAME` / `OPENF1_PASSWORD` | Required when `MQTT_SOURCE=live` |
+| `OPENF1_USERNAME` / `OPENF1_PASSWORD` | Live OpenF1 MQTT (`f1` + `MQTT_SOURCE=live`) |
 | `MQTT_LOCAL_HOST` / `MQTT_LOCAL_PORT` | Local broker (default `localhost:1883`) |
-| `ENGINE_DOMAIN` | Domain pack (default `f1`) |
-| `ENGINE_MIN_SEVERITY` | Minimum moment severity 1–9 (default `6`; `5` includes team radio) |
-| `USERS_FILE` | Subscriber JSON path (default `data/users.json`) |
+| `ENGINE_DOMAIN` | Domain pack (`f1` \| `starship`, default `f1`) |
+| `ENGINE_MIN_SEVERITY` | Minimum severity 1–9 (default `6`) |
+| `STARSHIP_SCRIPT` | Mission JSON for Starship ops bot |
+| `USERS_FILE` | Subscriber store path (default `data/users.json`) |
 
 ---
 
 ## Architecture
 
 ```text
-┌─────────────┐     ┌──────────────┐     ┌─────────┐     ┌────────┐
-│  NDJSON /   │     │   Domain     │     │  Gate   │     │Deliver │
-│  MQTT / …   │────▶│  reduce +    │────▶│ severity│────▶│ TG/log │
-│  normalize  │     │  detect      │     │ dedupe  │     │        │
-└─────────────┘     └──────────────┘     └─────────┘     └────────┘
-                           │
-                      templates
+┌──────────────────┐     ┌─────────────────┐     ┌──────────┐     ┌──────────┐
+│ Source adapter   │     │ Domain pack     │     │ Gate     │     │ Delivery │
+│ MQTT · NDJSON ·  │────▶│ snapshot reduce │────▶│ severity │────▶│ log · TG │
+│ manual · …       │     │ moment detect   │     │ dedupe   │     │ none     │
+└──────────────────┘     └─────────────────┘     └──────────┘     └──────────┘
+                                    │
+                               templates
 ```
 
 ```text
 src/
-  engine/                 Core pipeline
-    pipeline.js
+  engine/
+    pipeline.js           Shared orchestrator
     gate.js
     config.js
-    domains/f1/           F1 snapshot, detectors, templates, roster
-    ingest/               OpenF1 normalize + NDJSON reader
-  mqtt-worker.js          Live MQTT bridge
+    domains/
+      f1/                 Feed-driven reference domain
+      starship/           Manual-inject reference domain
+    ingest/               Adapters (e.g. OpenF1 normalize, NDJSON reader)
+  mqtt-worker.js
+  starship-session.js
   delivery.js
   users.js
   config.js
   runtime.js
-bin/
-  replay.js
-  worker.js
-  bot.js
-  publish-ndjson.js
-gold/                     Reference timelines for evaluation
+bin/                      CLI entrypoints
+examples/                 Mission scripts (starship)
+gold/                     Evaluation timelines (optional)
 ```
 
-**Pipeline defaults:** LLM off; preference filtering off. All subscribers receive the same global moments.
+**Defaults:** no LLM; no per-user preference filtering (global moments → all subscribers).
 
-**Extensibility:** additional source adapters implement the same normalized event shape; additional domains export `createState` / `reduce` / `detectMoments` / `renderMoment`.
+**Extension points**
 
----
-
-## F1 domain (summary)
-
-| Moment types (examples) | Severity (typical) |
-|-------------------------|-------------------|
-| Safety car / VSC / red flag | 9 |
-| Leader change, chequered | 9 |
-| Time penalties | 8 |
-| Session start/finish, investigations | 7 |
-| Pits (top of field higher), big position swings | 5–7 |
-| Team radio (with position / track context + URL) | 5 |
-
-Captures used for development live under sibling project artifacts (not vendored here). Gold sketches in `gold/` list high-value beats from public race reports.
+- **Source:** emit `{ type, t, payload }` (see existing ingest modules).  
+- **Domain:** export `createState`, `reduce`, `detectMoments`, `renderMoment`; register in `pipeline.js`.  
 
 ---
 
-## Project layout notes
+## Reference domains (summary)
 
-Cue is the open **engine and thin operators** (worker, replay, bot). Downstream products may brand separately (e.g. a consumer F1 bot) while depending on or embedding this repository.
+### `f1`
+
+Feed-oriented session coverage (flags, order changes, pits, stewards, session lifecycle; optional team radio at lower severity). Intended input: OpenF1 MQTT or compatible NDJSON captures.
+
+### `starship`
+
+Operator-oriented flight coverage (window, ascent, booster, ship, entry, anomaly). Intended input: human inject via CLI or Telegram; optional nominal T+ script for labeling and clock hints.
+
+Evaluation notes and capture inventories may live under `gold/` for development; they are not required at runtime.
 
 ---
 
 ## Disclaimer
 
-Cue is an independent project and is not affiliated with Formula 1 companies or OpenF1. Formula 1® and related marks are trademarks of their respective owners. Live data and media links are subject to upstream terms of use.
+Cue is an independent project. It is not affiliated with Formula 1 companies, OpenF1, SpaceX, or other upstream data providers. Third-party marks remain the property of their owners. Use of live feeds and media links is subject to upstream terms.
 
 ---
 
