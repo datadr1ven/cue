@@ -1,0 +1,41 @@
+# Deploy TPlus Worker on push to main (Cloudflare free tier).
+#
+# GitHub repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — API token with Workers Scripts Edit + Account read
+#   CLOUDFLARE_ACCOUNT_ID  — hex account id from CF dashboard
+#
+# KV namespace id must already be set in wrangler.toml (not a secret).
+
+name: Deploy TPlus
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate missions
+        run: npm run validate:missions
+
+      - name: Smoke TPlus
+        run: npm run smoke:tplus
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

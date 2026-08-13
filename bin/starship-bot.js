@@ -186,18 +186,19 @@ bot.command("mission", async (ctx) => {
 
 bot.command("eta", async (ctx) => {
   const st = session.status();
-  await ctx.reply(`${st.missionName || "Mission"}\n${st.etaText}`);
+  await ctx.reply(st.etaText);
 });
 
 bot.command("status", async (ctx) => {
   const st = session.status();
-  await ctx.reply(
-    `${st.missionName || "Starship"}\n` +
-      `${st.tPlusLabel}\n` +
-      `phase: ${st.phase}\n` +
-      `last: ${st.lastActionId || "—"}\n` +
-      `${st.etaText}`,
-  );
+  const lines = [
+    st.missionName || "Starship",
+    st.tPlusLabel,
+    `phase: ${st.phase}`,
+    `last: ${st.lastActionId || "—"}`,
+  ];
+  if (st.statusEtaLine) lines.push(st.statusEtaLine);
+  await ctx.reply(lines.join("\n"));
 });
 
 // —— admin ops ——

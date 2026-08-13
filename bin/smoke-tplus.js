@@ -53,11 +53,29 @@ assert(r.ok && /Test freeform/.test(r.alerts[0]?.text || ""), "note");
 r = await s2.fireBroadcast("Smoke broadcast hello");
 assert(r.ok && /broadcast|Smoke/i.test(r.alerts[0]?.text || ""), "broadcast");
 r = await s2.fireHype(48);
-assert(r.ok && r.alerts[0]?.text, "hype 48");
+assert(!r.ok, "hype should refuse long-past mission");
+console.log(`✓ hype blocked on past mission: ${r.error}`);
 
-const eta = formatEta(s2.scriptDoc.launchApproxUtc);
+const eta = formatEta(s2.scriptDoc.launchApproxUtc, Date.now(), {
+  missionName: s2.scriptDoc.missionName,
+});
 assert(eta.text, "eta text");
-console.log(`✓ eta sample: ${eta.text}`);
+assert(!/launchApproxUtc|slipped|todo/i.test(eta.text), "no internal jargon in eta");
+assert(
+  eta.kind === "past" || eta.kind === "upcoming" || eta.kind === "recent",
+  `eta kind ${eta.kind}`,
+);
+console.log(`✓ eta sample (${eta.kind}): ${eta.text}`);
+
+const etaMissing = formatEta(null);
+assert(/No upcoming|No launch NET/i.test(etaMissing.text), "missing net copy");
+assert(!/launchApproxUtc/i.test(etaMissing.text), "no field name when missing");
+console.log(`✓ eta missing NET: ${etaMissing.text}`);
+
+const futureIso = new Date(Date.now() + 3 * 864e5).toISOString();
+const etaFuture = formatEta(futureIso, Date.now(), { missionName: "Flight X" });
+assert(etaFuture.kind === "upcoming" && /T−/.test(etaFuture.text), "future eta");
+console.log(`✓ eta upcoming: ${etaFuture.text}`);
 
 s2.loadMission(12);
 assert(s2.scriptDoc.missionId.includes("12"), "switch mission");

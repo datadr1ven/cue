@@ -293,17 +293,20 @@ async function handleMessage(env, kv, message) {
 
   if (text.startsWith("/eta")) {
     const st = session.status();
-    await reply(env, chatId, `${st.missionName || "Mission"}\n${st.etaText}`);
+    await reply(env, chatId, st.etaText);
     return;
   }
 
   if (text.startsWith("/status")) {
     const st = session.status();
-    await reply(
-      env,
-      chatId,
-      `${st.missionName || "Starship"}\n${st.tPlusLabel}\nphase: ${st.phase}\nlast: ${st.lastActionId || "—"}\n${st.etaText}`,
-    );
+    const lines = [
+      st.missionName || "Starship",
+      st.tPlusLabel,
+      `phase: ${st.phase}`,
+      `last: ${st.lastActionId || "—"}`,
+    ];
+    if (st.statusEtaLine) lines.push(st.statusEtaLine);
+    await reply(env, chatId, lines.join("\n"));
     return;
   }
 

@@ -117,6 +117,16 @@ DELIVERY_MODE=telegram TELEGRAM_ADMIN_IDS=… npm run starship:bot
 
 Uses `data/users.json` on disk. Prefer **either** local polling **or** CF webhook, not both.
 
+## Deploy on git push
+
+1. GitHub repo → **Settings → Secrets and variables → Actions**
+2. Add:
+   - `CLOUDFLARE_API_TOKEN` — create at CF → My Profile → API Tokens → “Edit Cloudflare Workers”
+   - `CLOUDFLARE_ACCOUNT_ID` — hex id from the dashboard sidebar
+3. Workflow: `.github/workflows/deploy-tplus.yml` runs on push to `main` (validate + smoke + `wrangler deploy`).
+
+First-time: ensure `wrangler.toml` KV `id` is real and secrets (`TELEGRAM_TOKEN`, `TELEGRAM_ADMIN_IDS`) exist on the Worker (dashboard or `wrangler secret put`). GitHub deploy does not recreate those secrets.
+
 ## Free-tier notes
 
 - Sparse traffic (signups + launch day) fits Workers request limits.  

@@ -176,12 +176,28 @@ export function createStarshipSession(opts = {}) {
     }
     const name = scriptDoc?.missionName || "Next flight";
     const net = scriptDoc?.launchApproxUtc;
-    const eta = formatEtaFn(net);
+    const eta = formatEtaFn(net, Date.now(), { missionName: name });
+
+    // Don't hype a long-past mission as "2 days out"
+    if (eta.kind === "past" || eta.kind === "unknown" || eta.kind === "invalid") {
+      return {
+        ok: false,
+        error:
+          eta.kind === "past"
+            ? "Active mission already flew — switch to the next flight or set a future NET before hyping."
+            : "No upcoming NET on the active mission — set launchApproxUtc or switch mission first.",
+      };
+    }
+    if (eta.kind === "recent") {
+      return {
+        ok: false,
+        error: "NET window already passed for the active mission.",
+      };
+    }
+
     const window =
       h >= 48 ? "about 2 days" : h >= 24 ? "about 1 day" : `about ${h}h`;
-    const label = net
-      ? `${name} is ${window} out (NET ${net}). ${eta.ok ? eta.text : ""}`.trim()
-      : `${name}: launch window ~${window} out (set launchApproxUtc for exact NET).`;
+    const label = `${name} is ${window} out · ${eta.text}`;
     const wallMs = Date.now();
     const event = {
       type: "starship.action",
@@ -205,10 +221,18 @@ export function createStarshipSession(opts = {}) {
   function status() {
     const state = pipeline.getState();
     const tp = tPlusSec(state);
-    const eta = formatEtaFn(scriptDoc?.launchApproxUtc);
+    const name = scriptDoc?.missionName || null;
+    const eta = formatEtaFn(scriptDoc?.launchApproxUtc, Date.now(), {
+      missionName: name,
+    });
+    // During a live countdown after liftoff, prefer T+ over stale NET noise
+    const showEta =
+      !state.liftoffWallMs ||
+      eta.kind === "upcoming" ||
+      eta.kind === "unknown";
     return {
       missionId: scriptDoc?.missionId || null,
-      missionName: scriptDoc?.missionName || null,
+      missionName: name,
       missionNumber: missionEntry?.number ?? null,
       phase: state.phase,
       tPlusSec: tp,
@@ -217,7 +241,10 @@ export function createStarshipSession(opts = {}) {
       lastActionId: state.lastActionId,
       history: state.history,
       launchApproxUtc: scriptDoc?.launchApproxUtc || null,
+      etaKind: eta.kind,
       etaText: eta.text,
+      /** For /status: omit long-past NET spam when T+ is live */
+      statusEtaLine: showEta ? eta.text : null,
       path: missionPath,
     };
   }
