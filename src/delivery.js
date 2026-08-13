@@ -1,8 +1,6 @@
 /**
  * Outbound messages: telegram | log | none.
- *
- * Does NOT filter by admin allowlist — fan-out targets come from the
- * subscriber store (data/users.json). Ops gating is separate (isAdmin).
+ * Optional photo via Telegram file_id (same bot must have received the file).
  */
 
 /**
@@ -10,17 +8,22 @@
  * @param {{ deliveryMode: string }} runtime
  * @param {number|string} userId
  * @param {string} text
+ * @param {{ photoFileId?: string|null }} [opts]
  */
-export async function deliver(bot, runtime, userId, text) {
+export async function deliver(bot, runtime, userId, text, opts = {}) {
   const message = String(text ?? "").trim();
-  if (!message) return { ok: false, reason: "empty" };
+  const photoFileId = opts.photoFileId || null;
+  if (!message && !photoFileId) return { ok: false, reason: "empty" };
 
   const mode = runtime.deliveryMode;
 
   if (mode === "none") return { ok: true, reason: "none" };
 
   if (mode === "log") {
-    console.log(`[deliver:log] user=${userId} ${message.replace(/\n/g, " | ")}`);
+    const media = photoFileId ? ` photo=${photoFileId.slice(0, 12)}…` : "";
+    console.log(
+      `[deliver:log] user=${userId}${media} ${(message || "(photo)").replace(/\n/g, " | ")}`,
+    );
     return { ok: true, reason: "log" };
   }
 
@@ -30,10 +33,16 @@ export async function deliver(bot, runtime, userId, text) {
   }
 
   try {
-    await bot.telegram.sendMessage(userId, message);
+    if (photoFileId) {
+      await bot.telegram.sendPhoto(userId, photoFileId, {
+        caption: message ? message.slice(0, 1024) : undefined,
+      });
+    } else {
+      await bot.telegram.sendMessage(userId, message);
+    }
     return { ok: true, reason: "telegram" };
   } catch (error) {
-    console.error(`❌ sendMessage ${userId}:`, error.message);
+    console.error(`❌ deliver ${userId}:`, error.message);
     return { ok: false, reason: "error", error };
   }
 }

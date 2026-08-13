@@ -86,7 +86,9 @@ Stop any local `npm run starship:bot` (polling conflicts with webhook).
 1. Open the bot in Telegram.  
 2. `/start` → written to KV (if `ENROLL_OPEN=true`).  
 3. Admins use `/ops`, `/note`, `/broadcast`, `/hype`.  
-4. Everyone receives fan-out alerts.
+   - **Photo alerts:** send an image with caption `/note …` or `/broadcast …` (re-sent via Telegram `file_id`).  
+4. Everyone receives fan-out alerts.  
+5. User-facing **/** menu is registered via `setMyCommands` on the first webhook (ops commands stay hidden).
 
 ## New flight (e.g. 14)
 

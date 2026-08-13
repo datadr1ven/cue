@@ -2,8 +2,9 @@
 /**
  * TPlus — Telegram surface for Starship (Cue domain).
  *
- * Subscribers: /start (ENROLL_OPEN=true by default) → data/users.json → alerts
- * Admins: TELEGRAM_ADMIN_IDS or TELEGRAM_ALLOWLIST → /ops /note /broadcast /hype /mission use
+ * Subscribers: /start → data/users.json → alerts
+ * Admins: TELEGRAM_ADMIN_IDS → /ops /note /broadcast /hype /mission use
+ * Photo: send image with caption "/note …" or "/broadcast …"
  *
  *   TELEGRAM_TOKEN=… TELEGRAM_ADMIN_IDS=you DELIVERY_MODE=telegram npm run starship:bot
  */
@@ -22,6 +23,11 @@ import {
   formatTPlus,
 } from "../src/engine/domains/starship/index.js";
 import { createStarshipSession } from "../src/starship-session-node.js";
+import {
+  TPLUS_USER_COMMANDS,
+  parseNoteOrBroadcast,
+  largestPhotoFileId,
+} from "../src/tplus-commands.js";
 
 requireTelegramToken();
 
@@ -53,8 +59,11 @@ function requireAdmin(ctx) {
   return isAdmin(ctx.from?.id);
 }
 
-/** Fan-out to every subscriber in users.json */
-async function fanOut(text) {
+/**
+ * @param {string} text
+ * @param {{ photoFileId?: string|null }} [media]
+ */
+async function fanOut(text, media = {}) {
   reloadSubscribers();
   const users = [...subscribers.values()];
   if (users.length === 0) {
@@ -63,11 +72,15 @@ async function fanOut(text) {
   }
   let n = 0;
   for (const user of users) {
-    const r = await deliver(bot, runtime, user.user_id, text);
+    const r = await deliver(bot, runtime, user.user_id, text, {
+      photoFileId: media.photoFileId,
+    });
     if (r.ok) n += 1;
   }
   if (runtime.deliveryMode === "log") {
-    console.log(`[deliver:log] → ${n} users: ${text.replace(/\n/g, " | ")}`);
+    console.log(
+      `[deliver:log] → ${n} users photo=${Boolean(media.photoFileId)}: ${text.replace(/\n/g, " | ")}`,
+    );
   }
   return { n };
 }
@@ -106,10 +119,43 @@ function opsHelp() {
     userHelp() +
     `\n\nOps (admin)\n` +
     `/ops — milestone buttons\n` +
-    `/note <text> — freeform alert\n` +
-    `/broadcast <text> — announcement\n` +
+    `/note <text> — freeform alert (or photo + caption /note …)\n` +
+    `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/hype <hours> — e.g. /hype 48\n` +
     `/mission use <n> — set active flight`
+  );
+}
+
+/**
+ * @param {'note'|'broadcast'} kind
+ * @param {string} text
+ * @param {string|null} photoFileId
+ */
+async function sendNoteOrBroadcast(ctx, kind, text, photoFileId) {
+  const body = (text || "").trim();
+  if (!body && !photoFileId) {
+    await ctx.reply(
+      kind === "note"
+        ? "Usage: /note <text> — or send a photo with caption /note …"
+        : "Usage: /broadcast <text> — or send a photo with caption /broadcast …",
+    );
+    return;
+  }
+  const label = body || "📷";
+  const r =
+    kind === "note"
+      ? await session.fireNote(label)
+      : await session.fireBroadcast(label);
+  if (!r.ok) {
+    await ctx.reply(r.error);
+    return;
+  }
+  const alertText = r.alerts[0]?.text || label;
+  const { n } = await fanOut(alertText, { photoFileId });
+  await ctx.reply(
+    kind === "note"
+      ? `Sent to ${n} subscriber(s)${photoFileId ? " (with photo)" : ""}.`
+      : `Broadcast to ${n} subscriber(s)${photoFileId ? " (with photo)" : ""}.`,
   );
 }
 
@@ -140,7 +186,6 @@ bot.command("help", async (ctx) => {
 });
 
 bot.command("missions", async (ctx) => {
-  // browse: any enrolled user, or anyone if open
   if (!canEnroll(ctx.from.id) && !isAdmin(ctx.from.id)) {
     await ctx.reply("Use /start first.");
     return;
@@ -218,18 +263,7 @@ bot.command("note", async (ctx) => {
     return;
   }
   const text = (ctx.message.text || "").replace(/^\/note(@\w+)?\s*/i, "").trim();
-  if (!text) {
-    await ctx.reply("Usage: /note <text>");
-    return;
-  }
-  const r = await session.fireNote(text);
-  if (!r.ok) {
-    await ctx.reply(r.error);
-    return;
-  }
-  const alertText = r.alerts[0]?.text || text;
-  const { n } = await fanOut(alertText);
-  await ctx.reply(`Sent to ${n} subscriber(s).`);
+  await sendNoteOrBroadcast(ctx, "note", text, null);
 });
 
 bot.command("broadcast", async (ctx) => {
@@ -240,18 +274,24 @@ bot.command("broadcast", async (ctx) => {
   const text = (ctx.message.text || "")
     .replace(/^\/broadcast(@\w+)?\s*/i, "")
     .trim();
-  if (!text) {
-    await ctx.reply("Usage: /broadcast <text>");
+  await sendNoteOrBroadcast(ctx, "broadcast", text, null);
+});
+
+/** Photo with caption /note … or /broadcast … */
+bot.on("photo", async (ctx) => {
+  if (!requireAdmin(ctx)) {
+    await ctx.reply("Admin only.");
     return;
   }
-  const r = await session.fireBroadcast(text);
-  if (!r.ok) {
-    await ctx.reply(r.error);
+  const parsed = parseNoteOrBroadcast(ctx.message.caption || "");
+  if (!parsed) {
+    await ctx.reply(
+      "To send a photo to subscribers, use caption:\n/note your text\nor\n/broadcast your text",
+    );
     return;
   }
-  const alertText = r.alerts[0]?.text || text;
-  const { n } = await fanOut(alertText);
-  await ctx.reply(`Broadcast to ${n} subscriber(s).`);
+  const fileId = largestPhotoFileId(ctx.message);
+  await sendNoteOrBroadcast(ctx, parsed.kind, parsed.text, fileId);
 });
 
 bot.command("hype", async (ctx) => {
@@ -316,7 +356,13 @@ bot.on("callback_query", async (ctx) => {
   await ctx.reply(`${alertText}${extra}\n→ ${n} subscriber(s)`);
 });
 
-bot.launch().then(() => {
+bot.launch().then(async () => {
+  try {
+    await bot.telegram.setMyCommands(TPLUS_USER_COMMANDS);
+    console.log("Telegram / menu commands set (user-facing)");
+  } catch (e) {
+    console.warn("setMyCommands failed:", e.message);
+  }
   const st = session.status();
   console.log(
     `TPlus bot · mission=${st.missionName} · delivery=${runtime.deliveryMode} · ` +

@@ -138,7 +138,10 @@ TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id DELIVERY_MODE=telegram npm run sta
 | `/ops` | Milestone buttons |
 | `/note <text>` | Freeform alert (all subscribers) |
 | `/broadcast <text>` | Announcement |
+| photo + caption `/note …` or `/broadcast …` | Same as above, with image (admin) |
 | `/hype <hours>` | HITL lead-up template (e.g. 48) |
+
+The Telegram **/** menu lists user commands only (`start`, `help`, `missions`, `mission`, `eta`, `status`). Ops commands stay off the public menu.
 
 Add a flight: create `missions/flights/….json`, add an entry to `missions/index.json`, run `validate:missions` + `smoke:tplus`, commit.
 

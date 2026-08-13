@@ -21,6 +21,11 @@ import {
   bundledListMissions,
   bundledFormatEta,
 } from "../../src/missions/bundle.js";
+import {
+  TPLUS_USER_COMMANDS,
+  parseNoteOrBroadcast,
+  largestPhotoFileId,
+} from "../../src/tplus-commands.js";
 
 const loader = {
   loadMission: bundledLoadMission,
@@ -30,6 +35,9 @@ const loader = {
 
 const KV_USERS = "users:v1";
 const KV_SESSION = "session:v1";
+
+/** Once per isolate — keep Telegram / menu in sync with TPLUS_USER_COMMANDS */
+let commandsRegistered = false;
 
 function parseAdminIds(env) {
   const raw = env.TELEGRAM_ADMIN_IDS || env.TELEGRAM_ALLOWLIST || "";
@@ -140,14 +148,79 @@ async function reply(env, chatId, text, extra = {}) {
   });
 }
 
-async function fanOut(env, kv, text) {
+/**
+ * Fan-out text (and optional photo via file_id) to all subscribers.
+ * @param {{ photoFileId?: string|null }} [media]
+ */
+async function fanOut(env, kv, text, media = {}) {
   const ids = await subscriberIds(kv, env);
+  const photoFileId = media.photoFileId || null;
+  const caption = String(text || "").slice(0, 1024);
   let n = 0;
   for (const id of ids) {
-    const r = await reply(env, id, text);
+    let r;
+    if (photoFileId) {
+      r = await tg(env, "sendPhoto", {
+        chat_id: id,
+        photo: photoFileId,
+        caption: caption || undefined,
+      });
+    } else {
+      r = await reply(env, id, text);
+    }
     if (r.ok) n += 1;
   }
   return n;
+}
+
+async function ensureCommands(env) {
+  if (commandsRegistered) return;
+  commandsRegistered = true;
+  try {
+    await tg(env, "setMyCommands", { commands: TPLUS_USER_COMMANDS });
+  } catch (e) {
+    console.error("setMyCommands failed", e);
+    commandsRegistered = false;
+  }
+}
+
+/**
+ * @param {'note'|'broadcast'} kind
+ * @param {string} text
+ * @param {string|null} photoFileId
+ */
+async function sendNoteOrBroadcast(env, kv, session, chatId, kind, text, photoFileId) {
+  const body = (text || "").trim();
+  if (!body && !photoFileId) {
+    await reply(
+      env,
+      chatId,
+      kind === "note"
+        ? "Usage: /note <text> — or send a photo with caption /note …"
+        : "Usage: /broadcast <text> — or send a photo with caption /broadcast …",
+    );
+    return;
+  }
+  const label = body || "📷";
+  const r =
+    kind === "note"
+      ? await session.fireNote(label)
+      : await session.fireBroadcast(label);
+  if (!r.ok) {
+    await reply(env, chatId, r.error || "failed");
+    return;
+  }
+  await persistSession(kv, session);
+  const alertText = r.alerts[0]?.text || label;
+  const n = await fanOut(env, kv, alertText, { photoFileId });
+  const withPhoto = photoFileId ? " (with photo)" : "";
+  await reply(
+    env,
+    chatId,
+    kind === "note"
+      ? `Sent to ${n} subscriber(s)${withPhoto}.`
+      : `Broadcast to ${n} subscriber(s)${withPhoto}.`,
+  );
 }
 
 async function getSession(env, kv) {
@@ -201,15 +274,16 @@ function opsHelp() {
     userHelp() +
     `\n\nOps (admin)\n` +
     `/ops — milestone buttons\n` +
-    `/note <text>\n` +
-    `/broadcast <text>\n` +
+    `/note <text> — freeform alert (or photo + caption /note …)\n` +
+    `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/hype <hours>\n` +
     `/mission use <n>`
   );
 }
 
+/** Command line from text message or photo caption. */
 function cmdText(message) {
-  return (message?.text || "").trim();
+  return (message?.text || message?.caption || "").trim();
 }
 
 function stripCmd(text, name) {
@@ -221,10 +295,43 @@ async function handleMessage(env, kv, message) {
   const chatId = message.chat.id;
   const userId = message.from?.id;
   const text = cmdText(message);
-  if (!text.startsWith("/")) return;
-
+  const photoFileId = largestPhotoFileId(message);
   const session = await getSession(env, kv);
   const admin = isAdmin(env, userId);
+
+  // Photo with caption /note … or /broadcast … (or admin tip if unlabeled)
+  if (photoFileId && !text.startsWith("/")) {
+    if (admin) {
+      await reply(
+        env,
+        chatId,
+        "To send a photo to subscribers, use caption:\n/note your text\nor\n/broadcast your text",
+      );
+    }
+    return;
+  }
+
+  if (photoFileId) {
+    const parsed = parseNoteOrBroadcast(text);
+    if (parsed) {
+      if (!admin) {
+        await reply(env, chatId, "Admin only.");
+        return;
+      }
+      await sendNoteOrBroadcast(
+        env,
+        kv,
+        session,
+        chatId,
+        parsed.kind,
+        parsed.text,
+        photoFileId,
+      );
+      return;
+    }
+  }
+
+  if (!text.startsWith("/")) return;
 
   if (text.startsWith("/start")) {
     if (!canEnroll(env, userId)) {
@@ -327,16 +434,15 @@ async function handleMessage(env, kv, message) {
       await reply(env, chatId, "Admin only.");
       return;
     }
-    const note = stripCmd(text, "note");
-    if (!note) {
-      await reply(env, chatId, "Usage: /note <text>");
-      return;
-    }
-    const r = await session.fireNote(note);
-    await persistSession(kv, session);
-    const alertText = r.alerts[0]?.text || note;
-    const n = await fanOut(env, kv, alertText);
-    await reply(env, chatId, `Sent to ${n} subscriber(s).`);
+    await sendNoteOrBroadcast(
+      env,
+      kv,
+      session,
+      chatId,
+      "note",
+      stripCmd(text, "note"),
+      photoFileId,
+    );
     return;
   }
 
@@ -345,16 +451,15 @@ async function handleMessage(env, kv, message) {
       await reply(env, chatId, "Admin only.");
       return;
     }
-    const body = stripCmd(text, "broadcast");
-    if (!body) {
-      await reply(env, chatId, "Usage: /broadcast <text>");
-      return;
-    }
-    const r = await session.fireBroadcast(body);
-    await persistSession(kv, session);
-    const alertText = r.alerts[0]?.text || body;
-    const n = await fanOut(env, kv, alertText);
-    await reply(env, chatId, `Broadcast to ${n} subscriber(s).`);
+    await sendNoteOrBroadcast(
+      env,
+      kv,
+      session,
+      chatId,
+      "broadcast",
+      stripCmd(text, "broadcast"),
+      photoFileId,
+    );
     return;
   }
 
@@ -464,6 +569,9 @@ export default {
       } catch {
         return new Response("bad json", { status: 400 });
       }
+
+      // Best-effort: register user-facing / menu (ops stay out of BotFather list)
+      await ensureCommands(env);
 
       try {
         if (update.message) {
