@@ -1,14 +1,12 @@
 # Deploy TPlus Cloudflare Worker on push to main when TPlus-relevant paths change.
 #
 # GitHub → Settings → Secrets and variables → Actions:
-#   CLOUDFLARE_API_TOKEN   — "Edit Cloudflare Workers" (or custom: Account.Workers Scripts:Edit, Account:Read)
+#   CLOUDFLARE_API_TOKEN   — "Edit Cloudflare Workers" template (or Workers Scripts:Edit + Account:Read)
 #   CLOUDFLARE_ACCOUNT_ID  — hex Account ID from Cloudflare dashboard sidebar
 #
-# Worker runtime secrets (NOT in GitHub — set once via wrangler / CF dashboard):
+# Worker runtime secrets (Cloudflare dashboard / wrangler secret put — NOT GitHub):
 #   TELEGRAM_TOKEN
 #   TELEGRAM_ADMIN_IDS
-#
-# KV namespace id is in wrangler.toml (committed).
 
 name: Deploy TPlus
 
@@ -16,20 +14,16 @@ on:
   push:
     branches: [main]
     paths:
-      # Worker entry + config
       - "worker/tplus/**"
       - "wrangler.toml"
-      # Shared engine used by TPlus
       - "src/engine/pipeline.js"
       - "src/engine/gate.js"
       - "src/engine/config.js"
       - "src/engine/types.js"
       - "src/engine/domains/starship/**"
-      # Missions + session (bundled into Worker)
       - "src/missions/**"
       - "src/starship-session.js"
       - "missions/**"
-      # Deps / this workflow
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-tplus.yml"
@@ -61,20 +55,30 @@ jobs:
       - name: Smoke TPlus
         run: npm run smoke:tplus
 
-      - name: Check Cloudflare secrets present
+      - name: Check GitHub secrets present
+        env:
+          # Do not echo values; only check non-empty
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         run: |
-          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
-            echo "Missing GitHub secret CLOUDFLARE_API_TOKEN"
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::Missing repository secret CLOUDFLARE_API_TOKEN"
             exit 1
           fi
-          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
-            echo "Missing GitHub secret CLOUDFLARE_ACCOUNT_ID"
+          if [ "$HAS_ACCOUNT" != "true" ]; then
+            echo "::error::Missing repository secret CLOUDFLARE_ACCOUNT_ID"
             exit 1
           fi
+          echo "GitHub Cloudflare secrets are set (values not printed)."
+
+      - name: Whoami (Cloudflare)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler whoami
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
