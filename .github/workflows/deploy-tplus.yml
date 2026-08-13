@@ -1,21 +1,49 @@
-# Deploy TPlus Worker on push to main (Cloudflare free tier).
+# Deploy TPlus Cloudflare Worker on push to main when TPlus-relevant paths change.
 #
-# GitHub repo secrets (Settings → Secrets and variables → Actions):
-#   CLOUDFLARE_API_TOKEN   — API token with Workers Scripts Edit + Account read
-#   CLOUDFLARE_ACCOUNT_ID  — hex account id from CF dashboard
+# GitHub → Settings → Secrets and variables → Actions:
+#   CLOUDFLARE_API_TOKEN   — "Edit Cloudflare Workers" (or custom: Account.Workers Scripts:Edit, Account:Read)
+#   CLOUDFLARE_ACCOUNT_ID  — hex Account ID from Cloudflare dashboard sidebar
 #
-# KV namespace id must already be set in wrangler.toml (not a secret).
+# Worker runtime secrets (NOT in GitHub — set once via wrangler / CF dashboard):
+#   TELEGRAM_TOKEN
+#   TELEGRAM_ADMIN_IDS
+#
+# KV namespace id is in wrangler.toml (committed).
 
 name: Deploy TPlus
 
 on:
   push:
     branches: [main]
+    paths:
+      # Worker entry + config
+      - "worker/tplus/**"
+      - "wrangler.toml"
+      # Shared engine used by TPlus
+      - "src/engine/pipeline.js"
+      - "src/engine/gate.js"
+      - "src/engine/config.js"
+      - "src/engine/types.js"
+      - "src/engine/domains/starship/**"
+      # Missions + session (bundled into Worker)
+      - "src/missions/**"
+      - "src/starship-session.js"
+      - "missions/**"
+      # Deps / this workflow
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-tplus.yml"
   workflow_dispatch:
+
+concurrency:
+  group: deploy-tplus
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +60,17 @@ jobs:
 
       - name: Smoke TPlus
         run: npm run smoke:tplus
+
+      - name: Check Cloudflare secrets present
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "Missing GitHub secret CLOUDFLARE_API_TOKEN"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "Missing GitHub secret CLOUDFLARE_ACCOUNT_ID"
+            exit 1
+          fi
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3

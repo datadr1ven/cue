@@ -229,12 +229,15 @@ Evaluation notes and capture inventories may live under `gold/` for development;
 
 Persistent hosting for the Starship Telegram bot: **webhook Worker + KV**.
 
-See **[docs/tplus-cloudflare.md](./docs/tplus-cloudflare.md)** for deploy, secrets, webhook setup, and mission updates.
+See **[docs/tplus-cloudflare.md](./docs/tplus-cloudflare.md)** for deploy, webhook setup, mission updates, and **git-push autodeploy**.
 
 ```bash
 npm run validate:missions && npm run smoke:tplus
-npx wrangler deploy
+npx wrangler deploy   # manual
 ```
+
+**Autodeploy:** add GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.  
+Workflow [`.github/workflows/deploy-tplus.yml`](./.github/workflows/deploy-tplus.yml) deploys on push to `main` when TPlus-related paths change (not F1-only paths). Use **workflow_dispatch** to deploy manually from the Actions tab.
 
 Local Node polling (`npm run starship:bot`) remains available for development; use one or the other, not both, against the same bot token.
 

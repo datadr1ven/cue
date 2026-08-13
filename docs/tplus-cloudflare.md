@@ -117,15 +117,47 @@ DELIVERY_MODE=telegram TELEGRAM_ADMIN_IDS=… npm run starship:bot
 
 Uses `data/users.json` on disk. Prefer **either** local polling **or** CF webhook, not both.
 
-## Deploy on git push
+## Deploy on git push (GitHub Actions)
 
-1. GitHub repo → **Settings → Secrets and variables → Actions**
-2. Add:
-   - `CLOUDFLARE_API_TOKEN` — create at CF → My Profile → API Tokens → “Edit Cloudflare Workers”
-   - `CLOUDFLARE_ACCOUNT_ID` — hex id from the dashboard sidebar
-3. Workflow: `.github/workflows/deploy-tplus.yml` runs on push to `main` (validate + smoke + `wrangler deploy`).
+Workflow: [`.github/workflows/deploy-tplus.yml`](../.github/workflows/deploy-tplus.yml).
 
-First-time: ensure `wrangler.toml` KV `id` is real and secrets (`TELEGRAM_TOKEN`, `TELEGRAM_ADMIN_IDS`) exist on the Worker (dashboard or `wrangler secret put`). GitHub deploy does not recreate those secrets.
+### Path filters (so F1-only work does not redeploy TPlus)
+
+Deploy runs only when these change (or via **Actions → Deploy TPlus → Run workflow**):
+
+- `worker/tplus/**`, `wrangler.toml`
+- Shared engine pieces used by TPlus (`pipeline`, `gate`, `config`, `types`)
+- `src/engine/domains/starship/**`, `src/missions/**`, `src/starship-session.js`
+- `missions/**`, `package.json`, `package-lock.json`, the workflow file itself
+
+Edits under `src/engine/domains/f1/**` alone do **not** trigger this workflow.
+
+### One-time GitHub secrets
+
+Repo → **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret | Value |
+|--------|--------|
+| `CLOUDFLARE_API_TOKEN` | [Create token](https://dash.cloudflare.com/profile/api-tokens) — template **Edit Cloudflare Workers** (or custom: Account → Workers Scripts → Edit, Account → Account Settings → Read) |
+| `CLOUDFLARE_ACCOUNT_ID` | Hex **Account ID** from the Cloudflare dashboard sidebar (not your email) |
+
+### One-time Worker secrets (Cloudflare, not GitHub)
+
+Still required for the bot to run (CI only deploys code):
+
+```bash
+npx wrangler secret put TELEGRAM_TOKEN
+npx wrangler secret put TELEGRAM_ADMIN_IDS
+```
+
+Or Dashboard → Workers → `tplus` → Settings → Variables and Secrets.
+
+### After secrets are set
+
+1. Push to `main` (with a path that matches the filters), **or**  
+2. **Actions → Deploy TPlus → Run workflow** (works even if only README changed).
+
+Check the run is green; `getWebhookInfo` should still point at the worker URL.
 
 ## Free-tier notes
 
