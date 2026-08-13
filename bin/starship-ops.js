@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Starship Flight HITL — watch the webcast, press keys when events happen.
+ * Starship HITL CLI — watch webcast, press keys.
  *
  *   npm run starship:ops
- *   npm run starship:ops -- --script examples/starship-flight-13-script.json
+ *   npm run starship:ops -- --mission 12
+ *   npm run starship:ops -- --script path/to/file.json
  *
- * Keys: see on-screen help (?). Liftoff (0) starts T+.
- * Telegram: use npm run starship:bot for the same buttons from your phone.
+ * Keys: ? help · 0 liftoff · n then type note · q quit
  */
 
 import { resolve, dirname, join } from "path";
@@ -16,48 +16,45 @@ import {
   actionByKey,
   formatHelp,
   formatTPlus,
-  STARSHIP_ACTIONS,
 } from "../src/engine/domains/starship/index.js";
 import { createStarshipSession } from "../src/starship-session.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const defaultScript = join(
-  __dirname,
-  "..",
-  "examples",
-  "starship-flight-13-script.json",
-);
 
 function parseArgs(argv) {
-  let script = defaultScript;
+  /** @type {{ script?: string, mission?: string }} */
+  const out = {};
   for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === "--script") script = resolve(argv[++i]);
+    if (argv[i] === "--script") out.script = resolve(argv[++i]);
     else if (argv[i].startsWith("--script="))
-      script = resolve(argv[i].split("=")[1]);
+      out.script = resolve(argv[i].split("=")[1]);
+    else if (argv[i] === "--mission") out.mission = argv[++i];
+    else if (argv[i].startsWith("--mission="))
+      out.mission = argv[i].split("=")[1];
   }
-  return { script };
+  return out;
 }
 
-function printAlert(alert, state) {
-  const tp =
-    state.liftoffWallMs != null
-      ? formatTPlus((Date.now() - state.liftoffWallMs) / 1000)
-      : "—";
-  console.log(`\n⚡ [T+${tp}] ${alert.text}\n`);
+function printAlert(alert) {
+  console.log(`\n⚡ ${alert.text}\n`);
 }
 
 async function main() {
-  const { script } = parseArgs(process.argv);
+  const args = parseArgs(process.argv);
   const session = createStarshipSession({
-    scriptPath: script,
+    scriptPath: args.script,
+    missionRef: args.script ? undefined : args.mission || "default",
     minSeverity: 1,
-    onAlert: async (alert, state) => printAlert(alert, state),
+    onAlert: async (alert) => printAlert(alert),
   });
 
-  const mission = session.scriptDoc?.missionName || "Starship";
-  console.log(`Cue Starship ops — ${mission}`);
-  console.log(`Script: ${script}`);
+  const st0 = session.status();
+  console.log(`TPlus ops — ${st0.missionName || "Starship"}`);
+  if (st0.path) console.log(`Script: ${st0.path}`);
+  console.log(st0.etaText);
   console.log(formatHelp());
+  console.log("  n  freeform note (then type line + Enter)");
+  console.log("  m  list missions");
   console.log("Watch the video; press a key when the event happens.\n");
 
   if (!process.stdin.isTTY) {
@@ -69,11 +66,39 @@ async function main() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
 
+  let noteMode = false;
+  let noteBuf = "";
+
   const onKey = async (str, key) => {
     if (key?.ctrl && key.name === "c") {
       cleanup();
       process.exit(0);
     }
+
+    if (noteMode) {
+      if (key?.name === "return" || key?.name === "enter") {
+        noteMode = false;
+        process.stdin.setRawMode(true);
+        const text = noteBuf.trim();
+        noteBuf = "";
+        console.log();
+        if (text) {
+          const r = await session.fireNote(text);
+          if (!r.ok) console.log(`  error: ${r.error}`);
+        }
+        return;
+      }
+      if (key?.name === "backspace") {
+        noteBuf = noteBuf.slice(0, -1);
+        return;
+      }
+      if (str && str >= " ") {
+        noteBuf += str;
+        process.stdout.write(str);
+      }
+      return;
+    }
+
     if (key?.name === "return" || key?.name === "enter") return;
 
     const ch = str;
@@ -96,10 +121,23 @@ async function main() {
       console.log(`  phase=${st.phase} last=${st.lastActionId || "—"}`);
       return;
     }
+    if (ch === "m" || ch === "M") {
+      console.log(session.formatMissionList());
+      return;
+    }
+    if (ch === "e" || ch === "E") {
+      // 'e' is also entry action — only use E for eta if we conflict
+    }
+    if (ch === "n" || ch === "N") {
+      noteMode = true;
+      noteBuf = "";
+      process.stdin.setRawMode(false);
+      process.stdout.write("note> ");
+      return;
+    }
 
     const action = actionByKey(ch);
     if (!action) {
-      // ignore unknown (arrows etc.)
       if (ch && ch.length === 1 && /[a-zA-Z0-9]/.test(ch)) {
         console.log(`  (unknown key '${ch}' — press ? for help)`);
       }
@@ -111,19 +149,15 @@ async function main() {
       console.log(`  error: ${result.error}`);
       return;
     }
-    if (result.alerts.length === 0) {
-      console.log(`  (no alert emitted for ${action.id})`);
-    }
-    // script delta hint
     if (
       result.tPlusSec != null &&
-      action.scriptTPlusSec != null &&
+      result.action?.scriptTPlusSec != null &&
       action.id !== "liftoff"
     ) {
-      const delta = result.tPlusSec - action.scriptTPlusSec;
+      const delta = result.tPlusSec - result.action.scriptTPlusSec;
       const sign = delta >= 0 ? "+" : "";
       console.log(
-        `  script T+${formatTPlus(action.scriptTPlusSec)}  Δ ${sign}${delta.toFixed(0)}s vs script`,
+        `  script T+${formatTPlus(result.action.scriptTPlusSec)}  Δ ${sign}${delta.toFixed(0)}s vs script`,
       );
     }
   };
@@ -140,7 +174,6 @@ async function main() {
     onKey(str, key).catch((e) => console.error(e));
   });
 
-  // keep alive
   await new Promise(() => {});
 }
 

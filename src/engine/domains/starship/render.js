@@ -5,13 +5,28 @@ import { formatTPlus } from "./actions.js";
  */
 export function renderStarshipMoment(moment) {
   const d = moment.data || {};
+  const label = d.label || d.actionId || moment.type;
+  const mission = d.missionName ? `${d.missionName}` : null;
+  const id = d.actionId;
+
+  if (id === "broadcast") {
+    return `📢 ${label}`;
+  }
+  if (id === "hype") {
+    return `📣 ${label}`;
+  }
+  if (id === "note") {
+    const tPlus =
+      d.tPlusSec != null ? `T+${formatTPlus(d.tPlusSec)}` : null;
+    const head = [mission, tPlus].filter(Boolean).join(" · ");
+    return head ? `📝 ${head} — ${label}` : `📝 ${label}`;
+  }
+
   const tPlus =
     d.tPlusSec != null ? `T+${formatTPlus(d.tPlusSec)}` : "T+—";
-  const mission = d.missionName ? `${d.missionName} · ` : "";
-  const label = d.label || d.actionId || moment.type;
-
-  const emoji = emojiFor(d.actionId);
-  return `${emoji} ${mission}${tPlus} — ${label}`;
+  const prefix = mission ? `${mission} · ` : "";
+  const emoji = emojiFor(id);
+  return `${emoji} ${prefix}${tPlus} — ${label}`;
 }
 
 function emojiFor(id) {

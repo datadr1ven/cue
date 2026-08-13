@@ -112,22 +112,35 @@ npm run bot
 
 Allowlisted users: `/start` appends to `data/users.json`. The worker fans out alerts to that list. Enrollment is separate from domain logic.
 
-### Manual inject (Starship reference domain)
+### Manual inject (Starship / TPlus)
 
-For streams without a public event bus, operators mark moments while watching an external source (e.g. a webcast). Mission scripts supply nominal T+ labels and Δ hints only; presses are ground truth.
+For streams without a public event bus, operators mark moments while watching an external source. Flight timelines live under `missions/` (git). All allowlisted subscribers share one notification stream.
 
 ```bash
-# CLI
-npm run starship:ops
-npm run starship:ops -- --script examples/starship-flight-12-script.json
+# Before committing a new flight JSON
+npm run validate:missions
+npm run validate:missions -- missions/flights/starship-flight-14-script.json
+npm run smoke:tplus
 
-# Telegram ops (allowlist)
-TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id npm run starship:bot
-STARSHIP_SCRIPT=examples/starship-flight-12-script.json npm run starship:bot
-# /ops — inline buttons
+# CLI ops
+npm run starship:ops
+npm run starship:ops -- --mission 12
+
+# Telegram (browse + ops + freeform)
+TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id DELIVERY_MODE=telegram npm run starship:bot
 ```
 
-Example scripts: `examples/starship-flight-*.json`. Copy and edit for additional missions (`missionId`, `missionName`, `script[]`).
+| Command | Role |
+|---------|------|
+| `/missions` · `/mission <n>` | Archive browse |
+| `/mission use <n>` | Active flight (ops + ETA) |
+| `/eta` · `/status` | NET countdown · live T+ |
+| `/ops` | Milestone buttons |
+| `/note <text>` | Freeform alert (all subscribers) |
+| `/broadcast <text>` | Announcement |
+| `/hype <hours>` | HITL lead-up template (e.g. 48) |
+
+Add a flight: create `missions/flights/….json`, add an entry to `missions/index.json`, run `validate:missions` + `smoke:tplus`, commit.
 
 ---
 
@@ -146,7 +159,8 @@ See [`.env.example`](./.env.example).
 | `MQTT_LOCAL_HOST` / `MQTT_LOCAL_PORT` | Local broker (default `localhost:1883`) |
 | `ENGINE_DOMAIN` | Domain pack (`f1` \| `starship`, default `f1`) |
 | `ENGINE_MIN_SEVERITY` | Minimum severity 1–9 (default `6`) |
-| `STARSHIP_SCRIPT` | Mission JSON for Starship ops bot |
+| `STARSHIP_MISSION` | Default mission ref (number or id) for TPlus bot |
+| `STARSHIP_SCRIPT` | Optional path override for a single mission JSON |
 | `USERS_FILE` | Subscriber store path (default `data/users.json`) |
 
 ---
@@ -173,6 +187,7 @@ src/
       f1/                 Feed-driven reference domain
       starship/           Manual-inject reference domain
     ingest/               Adapters (e.g. OpenF1 normalize, NDJSON reader)
+  missions/               Mission index + load/validate
   mqtt-worker.js
   starship-session.js
   delivery.js
@@ -180,7 +195,8 @@ src/
   config.js
   runtime.js
 bin/                      CLI entrypoints
-examples/                 Mission scripts (starship)
+missions/                 Flight timeline JSON + index.json
+examples/                 Legacy copies of sample scripts
 gold/                     Evaluation timelines (optional)
 ```
 

@@ -33,6 +33,11 @@ export function reduceStarship(state, event) {
     next.missionId = p.missionId || next.missionId;
     next.missionName = p.missionName || next.missionName;
     next.script = p.script || next.script;
+    next.launchApproxUtc = p.launchApproxUtc || next.launchApproxUtc;
+    next.liftoffWallMs = null;
+    next.phase = "prelaunch";
+    next.lastActionId = null;
+    next.history = [];
     return next;
   }
 
