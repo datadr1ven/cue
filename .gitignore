@@ -5,3 +5,5 @@ data/users.json
 .DS_Store
 .idea/
 .vscode/
+.wrangler/
+.dev.vars

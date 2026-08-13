@@ -21,7 +21,7 @@ import {
   STARSHIP_ACTIONS,
   formatTPlus,
 } from "../src/engine/domains/starship/index.js";
-import { createStarshipSession } from "../src/starship-session.js";
+import { createStarshipSession } from "../src/starship-session-node.js";
 
 requireTelegramToken();
 

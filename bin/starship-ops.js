@@ -17,7 +17,7 @@ import {
   formatHelp,
   formatTPlus,
 } from "../src/engine/domains/starship/index.js";
-import { createStarshipSession } from "../src/starship-session.js";
+import { createStarshipSession } from "../src/starship-session-node.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

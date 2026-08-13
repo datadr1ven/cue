@@ -39,7 +39,9 @@
     "starship:ops": "node bin/starship-ops.js",
     "starship:bot": "node bin/starship-bot.js",
     "validate:missions": "node bin/validate-mission.js",
-    "smoke:tplus": "node bin/smoke-tplus.js"
+    "smoke:tplus": "node bin/smoke-tplus.js",
+    "cf:deploy": "wrangler deploy",
+    "cf:dev": "wrangler dev"
   },
   "engines": {
     "node": ">=18"
@@ -50,5 +52,8 @@
     "dotenv": "^17.3.1",
     "mqtt": "^5.15.0",
     "telegraf": "^4.16.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
   }
 }

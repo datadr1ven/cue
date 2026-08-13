@@ -225,6 +225,21 @@ Evaluation notes and capture inventories may live under `gold/` for development;
 
 ---
 
+## TPlus on Cloudflare (free tier)
+
+Persistent hosting for the Starship Telegram bot: **webhook Worker + KV**.
+
+See **[docs/tplus-cloudflare.md](./docs/tplus-cloudflare.md)** for deploy, secrets, webhook setup, and mission updates.
+
+```bash
+npm run validate:missions && npm run smoke:tplus
+npx wrangler deploy
+```
+
+Local Node polling (`npm run starship:bot`) remains available for development; use one or the other, not both, against the same bot token.
+
+---
+
 ## Disclaimer
 
 Cue is an independent project. It is not affiliated with Formula 1 companies, OpenF1, SpaceX, or other upstream data providers. Third-party marks remain the property of their owners. Use of live feeds and media links is subject to upstream terms.

@@ -12,7 +12,7 @@ import {
   formatEta,
   MISSIONS_ROOT,
 } from "../src/missions/registry.js";
-import { createStarshipSession } from "../src/starship-session.js";
+import { createStarshipSession } from "../src/starship-session-node.js";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);

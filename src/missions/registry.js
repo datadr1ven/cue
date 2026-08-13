@@ -1,20 +1,56 @@
 /**
- * Mission catalog: index.json + per-flight script JSON under missions/.
+ * Mission catalog via filesystem (Node only — not for Workers).
  */
 
 import { readFileSync, existsSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { actionById } from "../engine/domains/starship/actions.js";
+import { formatEta, scriptTPlusMap } from "./script-utils.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-export const MISSIONS_ROOT = join(__dirname, "..", "..", "missions");
+export { formatEta, scriptTPlusMap };
+
+function computeMissionsRoot() {
+  try {
+    const u = import.meta?.url;
+    if (typeof u === "string" && u.startsWith("file:")) {
+      return join(dirname(fileURLToPath(u)), "..", "..", "missions");
+    }
+  } catch {
+    /* Workers / non-file URL */
+  }
+  return null;
+}
+
+/** @type {string|null} */
+let _missionsRoot = undefined;
+
+export function getMissionsRoot() {
+  if (_missionsRoot === undefined) {
+    _missionsRoot = computeMissionsRoot();
+  }
+  return _missionsRoot;
+}
+
+/** @deprecated use getMissionsRoot() */
+export const MISSIONS_ROOT = computeMissionsRoot();
+
+function rootOrThrow(root) {
+  const r = root ?? getMissionsRoot();
+  if (!r) {
+    throw new Error(
+      "Mission filesystem root unavailable (use bundled loader on Workers)",
+    );
+  }
+  return r;
+}
 
 /**
  * @param {string} [root]
  */
-export function loadIndex(root = MISSIONS_ROOT) {
-  const indexPath = join(root, "index.json");
+export function loadIndex(root) {
+  const r = rootOrThrow(root);
+  const indexPath = join(r, "index.json");
   if (!existsSync(indexPath)) {
     throw new Error(`Mission index not found: ${indexPath}`);
   }
@@ -26,10 +62,10 @@ export function loadIndex(root = MISSIONS_ROOT) {
 }
 
 /**
- * @param {string|number} ref - mission id, number, or "latest" / "default"
+ * @param {string|number} ref
  * @param {string} [root]
  */
-export function resolveMissionRef(ref, root = MISSIONS_ROOT) {
+export function resolveMissionRef(ref, root) {
   const index = loadIndex(root);
   if (ref == null || ref === "" || ref === "default" || ref === "latest") {
     const id = index.defaultMissionId || index.missions.at(-1)?.id;
@@ -48,12 +84,13 @@ export function resolveMissionRef(ref, root = MISSIONS_ROOT) {
 }
 
 /**
- * @param {object} entry - index entry
+ * @param {object} entry
  * @param {string} [root]
  */
-export function loadMissionDoc(entry, root = MISSIONS_ROOT) {
+export function loadMissionDoc(entry, root) {
+  const r = rootOrThrow(root);
   if (!entry?.file) throw new Error("Mission entry missing file");
-  const path = join(root, entry.file);
+  const path = join(r, entry.file);
   if (!existsSync(path)) throw new Error(`Mission file not found: ${path}`);
   const doc = JSON.parse(readFileSync(path, "utf8"));
   return { entry, path, doc };
@@ -63,13 +100,13 @@ export function loadMissionDoc(entry, root = MISSIONS_ROOT) {
  * @param {string|number} ref
  * @param {string} [root]
  */
-export function loadMission(ref, root = MISSIONS_ROOT) {
+export function loadMission(ref, root) {
   const entry = resolveMissionRef(ref, root);
   if (!entry) return null;
   return loadMissionDoc(entry, root);
 }
 
-export function listMissions(root = MISSIONS_ROOT) {
+export function listMissions(root) {
   const index = loadIndex(root);
   return index.missions.map((m) => ({
     ...m,
@@ -78,25 +115,9 @@ export function listMissions(root = MISSIONS_ROOT) {
 }
 
 /**
- * Map actionId → nominal tPlusSec from mission script.
- * @param {object} doc
- */
-export function scriptTPlusMap(doc) {
-  /** @type {Map<string, number>} */
-  const map = new Map();
-  for (const row of doc?.script || []) {
-    if (row.actionId != null && row.tPlusSec != null) {
-      map.set(row.actionId, Number(row.tPlusSec));
-    }
-  }
-  return map;
-}
-
-/**
- * Validate index + one or all mission files.
  * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
  */
-export function validateMissions(root = MISSIONS_ROOT, onlyId = null) {
+export function validateMissions(root, onlyId = null) {
   const errors = [];
   const warnings = [];
   let index;
@@ -108,7 +129,9 @@ export function validateMissions(root = MISSIONS_ROOT, onlyId = null) {
 
   if (index.defaultMissionId) {
     const d = index.missions.find((m) => m.id === index.defaultMissionId);
-    if (!d) errors.push(`defaultMissionId not in missions: ${index.defaultMissionId}`);
+    if (!d) {
+      errors.push(`defaultMissionId not in missions: ${index.defaultMissionId}`);
+    }
   }
 
   const seenIds = new Set();
@@ -134,12 +157,6 @@ export function validateMissions(root = MISSIONS_ROOT, onlyId = null) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
-/**
- * @param {object} doc
- * @param {string} path
- * @param {string[]} errors
- * @param {string[]} warnings
- */
 export function validateMissionDoc(doc, path, errors = [], warnings = []) {
   const p = path || doc.missionId || "mission";
   if (!doc.missionId) errors.push(`${p}: missionId required`);
@@ -184,53 +201,14 @@ export function validateMissionDoc(doc, path, errors = [], warnings = []) {
   }
 
   if (!ids.has("liftoff")) {
-    warnings.push(`${p}: script has no liftoff row (T+0 mark still works via ops)`);
+    warnings.push(
+      `${p}: script has no liftoff row (T+0 mark still works via ops)`,
+    );
   }
 
   return { errors, warnings };
 }
 
-/**
- * Format eta from launchApproxUtc.
- * @param {string|null} iso
- * @param {number} [nowMs]
- */
-export function formatEta(iso, nowMs = Date.now()) {
-  if (!iso) return { ok: false, text: "No launch time set for this mission (launchApproxUtc)." };
-  const target = Date.parse(iso);
-  if (Number.isNaN(target)) {
-    return { ok: false, text: `Invalid launchApproxUtc: ${iso}` };
-  }
-  const deltaMs = target - nowMs;
-  const abs = Math.abs(deltaMs);
-  const sec = Math.floor(abs / 1000);
-  const d = Math.floor(sec / 86400);
-  const h = Math.floor((sec % 86400) / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const parts = [];
-  if (d) parts.push(`${d}d`);
-  if (h || d) parts.push(`${h}h`);
-  parts.push(`${m}m`);
-  const span = parts.join(" ");
-  if (deltaMs > 0) {
-    return {
-      ok: true,
-      text: `T−${span} until NET ${iso} (approx)`,
-      deltaMs,
-      past: false,
-    };
-  }
-  return {
-    ok: true,
-    text: `NET ${iso} was ~${span} ago (update launchApproxUtc if slipped)`,
-    deltaMs,
-    past: true,
-  };
-}
-
-/**
- * Absolute path helper for external --script files
- */
 export function loadMissionFromPath(filePath) {
   const path = resolve(filePath);
   const doc = JSON.parse(readFileSync(path, "utf8"));

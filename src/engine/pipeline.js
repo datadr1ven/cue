@@ -72,6 +72,11 @@ export function createPipeline(configOverrides = {}) {
     return state;
   }
 
+  /** Replace domain state (e.g. hydrate from KV). */
+  function replaceState(next) {
+    state = next;
+  }
+
   function reset() {
     state = domain.createState();
   }
@@ -80,6 +85,7 @@ export function createPipeline(configOverrides = {}) {
     config,
     push,
     getState,
+    replaceState,
     reset,
     domainName: config.domain,
   };

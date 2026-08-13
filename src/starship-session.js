@@ -1,5 +1,6 @@
 /**
- * Shared Starship HITL session: mission load + action / note inject.
+ * Starship HITL session (runtime-agnostic).
+ * Requires opts.loader — on Node use createNodeStarshipSession from starship-session-node.js
  */
 
 import { createPipeline } from "./engine/pipeline.js";
@@ -8,23 +9,26 @@ import {
   formatTPlus,
   tPlusSec,
 } from "./engine/domains/starship/index.js";
-import {
-  loadMission,
-  loadMissionFromPath,
-  listMissions,
-  scriptTPlusMap,
-  formatEta,
-  MISSIONS_ROOT,
-} from "./missions/registry.js";
+import { scriptTPlusMap, formatEta as defaultFormatEta } from "./missions/script-utils.js";
 
 /**
- * @param {object} [opts]
- * @param {string|number} [opts.missionRef] - id, number, or default
- * @param {string} [opts.scriptPath] - absolute/relative path (overrides registry)
+ * @param {object} opts
+ * @param {{ loadMission: Function, listMissions: Function, formatEta?: Function }} opts.loader
+ * @param {string|number} [opts.missionRef]
  * @param {number} [opts.minSeverity]
  * @param {(alert: object, state: object) => void|Promise<void>} [opts.onAlert]
  */
 export function createStarshipSession(opts = {}) {
+  if (!opts.loader?.loadMission || !opts.loader?.listMissions) {
+    throw new Error(
+      "createStarshipSession requires opts.loader { loadMission, listMissions }",
+    );
+  }
+
+  const loadMissionFn = opts.loader.loadMission;
+  const listMissionsFn = opts.loader.listMissions;
+  const formatEtaFn = opts.loader.formatEta || defaultFormatEta;
+
   const pipeline = createPipeline({
     domain: "starship",
     source: "manual",
@@ -46,7 +50,6 @@ export function createStarshipSession(opts = {}) {
     missionEntry = loaded.entry;
     missionPath = loaded.path;
     tPlusByAction = scriptTPlusMap(scriptDoc);
-    // reset flight clock when switching missions
     pipeline.reset();
     pipeline.push({
       type: "starship.mission",
@@ -62,17 +65,10 @@ export function createStarshipSession(opts = {}) {
     return true;
   }
 
-  if (opts.scriptPath) {
-    applyMission(loadMissionFromPath(opts.scriptPath));
-  } else {
-    applyMission(loadMission(opts.missionRef ?? "default", MISSIONS_ROOT));
-  }
+  applyMission(loadMissionFn(opts.missionRef ?? "default"));
 
-  /**
-   * @param {string|number} ref
-   */
   function loadMissionRef(ref) {
-    const loaded = loadMission(ref, MISSIONS_ROOT);
+    const loaded = loadMissionFn(ref);
     if (!loaded) return { ok: false, error: `unknown mission: ${ref}` };
     applyMission(loaded);
     return { ok: true, entry: missionEntry, doc: scriptDoc };
@@ -86,10 +82,6 @@ export function createStarshipSession(opts = {}) {
     return { alerts, state };
   }
 
-  /**
-   * @param {string} actionId
-   * @param {object} [extra]
-   */
   async function fire(actionId, extra = {}) {
     const action = actionById(actionId);
     if (!action) {
@@ -101,10 +93,9 @@ export function createStarshipSession(opts = {}) {
     let tPlus = tPlusSec(stateBefore, wallMs);
     if (actionId === "liftoff") tPlus = 0;
 
-    const scriptT =
-      tPlusByAction.has(actionId)
-        ? tPlusByAction.get(actionId)
-        : action.scriptTPlusSec;
+    const scriptT = tPlusByAction.has(actionId)
+      ? tPlusByAction.get(actionId)
+      : action.scriptTPlusSec;
 
     const event = {
       type: "starship.action",
@@ -132,12 +123,6 @@ export function createStarshipSession(opts = {}) {
     };
   }
 
-  /**
-   * Freeform note → all subscribers (same stream).
-   * @param {string} text
-   * @param {object} [opts2]
-   * @param {number} [opts2.severity]
-   */
   async function fireNote(text, opts2 = {}) {
     const label = String(text || "").trim();
     if (!label) return { ok: false, error: "empty note" };
@@ -162,10 +147,6 @@ export function createStarshipSession(opts = {}) {
     return { ok: true, alerts, state, tPlusSec: tPlus };
   }
 
-  /**
-   * Announcement (same fan-out; distinct render).
-   * @param {string} text
-   */
   async function fireBroadcast(text) {
     const label = String(text || "").trim();
     if (!label) return { ok: false, error: "empty broadcast" };
@@ -188,10 +169,6 @@ export function createStarshipSession(opts = {}) {
     return { ok: true, alerts, state };
   }
 
-  /**
-   * HITL hype template from launchApproxUtc.
-   * @param {number} hours - e.g. 48, 24, 1
-   */
   async function fireHype(hours) {
     const h = Number(hours);
     if (!Number.isFinite(h) || h <= 0) {
@@ -199,7 +176,7 @@ export function createStarshipSession(opts = {}) {
     }
     const name = scriptDoc?.missionName || "Next flight";
     const net = scriptDoc?.launchApproxUtc;
-    const eta = formatEta(net);
+    const eta = formatEtaFn(net);
     const window =
       h >= 48 ? "about 2 days" : h >= 24 ? "about 1 day" : `about ${h}h`;
     const label = net
@@ -228,7 +205,7 @@ export function createStarshipSession(opts = {}) {
   function status() {
     const state = pipeline.getState();
     const tp = tPlusSec(state);
-    const eta = formatEta(scriptDoc?.launchApproxUtc);
+    const eta = formatEtaFn(scriptDoc?.launchApproxUtc);
     return {
       missionId: scriptDoc?.missionId || null,
       missionName: scriptDoc?.missionName || null,
@@ -245,15 +222,11 @@ export function createStarshipSession(opts = {}) {
     };
   }
 
-  /**
-   * Human-readable timeline for archive browse.
-   * @param {string|number} [ref] - default active
-   */
   function formatTimeline(ref) {
     const loaded =
       ref == null || ref === ""
         ? { doc: scriptDoc, entry: missionEntry }
-        : loadMission(ref, MISSIONS_ROOT);
+        : loadMissionFn(ref);
     if (!loaded?.doc) return "Mission not found.";
     const doc = loaded.doc;
     const lines = [
@@ -264,21 +237,43 @@ export function createStarshipSession(opts = {}) {
       "Nominal T+ (script):",
     ].filter((x) => x != null);
     for (const row of doc.script || []) {
-      const t =
-        row.tPlusSec == null ? "—" : formatTPlus(Number(row.tPlusSec));
+      const t = row.tPlusSec == null ? "—" : formatTPlus(Number(row.tPlusSec));
       lines.push(`  T+${t}  ${row.label || row.actionId}`);
     }
     return lines.join("\n");
   }
 
   function formatMissionList() {
-    const rows = listMissions(MISSIONS_ROOT);
-    return rows
+    return listMissionsFn()
       .map(
         (m) =>
           `${m.isDefault ? "*" : " "} ${m.number ?? "—"}  ${m.label || m.id}`,
       )
       .join("\n");
+  }
+
+  function exportState() {
+    const st = pipeline.getState();
+    return {
+      missionId: scriptDoc?.missionId || null,
+      liftoffWallMs: st.liftoffWallMs,
+      phase: st.phase,
+      lastActionId: st.lastActionId,
+      history: st.history || [],
+    };
+  }
+
+  function hydrate(saved) {
+    if (!saved) return;
+    if (saved.missionId) loadMissionRef(saved.missionId);
+    const st = pipeline.getState();
+    pipeline.replaceState({
+      ...st,
+      liftoffWallMs: saved.liftoffWallMs ?? st.liftoffWallMs,
+      phase: saved.phase || st.phase,
+      lastActionId: saved.lastActionId ?? st.lastActionId,
+      history: Array.isArray(saved.history) ? saved.history : st.history,
+    });
   }
 
   return {
@@ -297,7 +292,9 @@ export function createStarshipSession(opts = {}) {
     loadMission: loadMissionRef,
     formatTimeline,
     formatMissionList,
-    formatEta: () => formatEta(scriptDoc?.launchApproxUtc),
+    formatEta: () => formatEtaFn(scriptDoc?.launchApproxUtc),
+    exportState,
+    hydrate,
     reset: () => {
       const ref = missionEntry?.id || scriptDoc?.missionId;
       pipeline.reset();
