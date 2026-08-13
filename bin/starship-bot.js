@@ -2,23 +2,26 @@
 /**
  * TPlus — Telegram surface for Starship (Cue domain).
  *
- * Allowlisted users: full product (browse, eta, receive alerts).
- * Same allowlist: admin ops (buttons, note, broadcast, hype, mission use).
+ * Subscribers: /start (ENROLL_OPEN=true by default) → data/users.json → alerts
+ * Admins: TELEGRAM_ADMIN_IDS or TELEGRAM_ALLOWLIST → /ops /note /broadcast /hype /mission use
  *
- *   TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id npm run starship:bot
- *   DELIVERY_MODE=log|telegram|none  (default telegram if unset when token present)
- *
- * Commands: /start /help /missions /mission /eta /status
- * Admin:    /ops /note /broadcast /hype /mission use N
+ *   TELEGRAM_TOKEN=… TELEGRAM_ADMIN_IDS=you DELIVERY_MODE=telegram npm run starship:bot
  */
 
 import { Telegraf, Markup } from "telegraf";
 import { config, requireTelegramToken } from "../src/config.js";
-import { isAllowed, loadSubscribers, enrollUser } from "../src/users.js";
+import {
+  isAdmin,
+  canEnroll,
+  loadSubscribers,
+  enrollUser,
+} from "../src/users.js";
 import { deliver } from "../src/delivery.js";
-import { STARSHIP_ACTIONS, formatTPlus } from "../src/engine/domains/starship/index.js";
+import {
+  STARSHIP_ACTIONS,
+  formatTPlus,
+} from "../src/engine/domains/starship/index.js";
 import { createStarshipSession } from "../src/starship-session.js";
-import { listMissions } from "../src/missions/registry.js";
 
 requireTelegramToken();
 
@@ -28,18 +31,15 @@ const deliveryMode =
 
 const runtime = {
   deliveryMode,
-  telegramAllowlist: config.telegramAllowlist,
 };
 
 const bot = new Telegraf(config.telegramToken);
 let subscribers = loadSubscribers();
 
-const initialRef = process.env.STARSHIP_SCRIPT
-  ? undefined
-  : process.env.STARSHIP_MISSION || "default";
-
 const session = createStarshipSession({
-  missionRef: process.env.STARSHIP_SCRIPT ? undefined : initialRef,
+  missionRef: process.env.STARSHIP_SCRIPT
+    ? undefined
+    : process.env.STARSHIP_MISSION || "default",
   scriptPath: process.env.STARSHIP_SCRIPT || undefined,
   minSeverity: 1,
 });
@@ -49,15 +49,11 @@ function reloadSubscribers() {
   return subscribers.size;
 }
 
-function requireUser(ctx) {
-  return isAllowed(ctx.from?.id);
+function requireAdmin(ctx) {
+  return isAdmin(ctx.from?.id);
 }
 
-/**
- * Fan-out to all subscribers (including operator).
- * @param {string} text
- * @param {number} [exceptId] - deprecated; we send to everyone including ops
- */
+/** Fan-out to every subscriber in users.json */
 async function fanOut(text) {
   reloadSubscribers();
   const users = [...subscribers.values()];
@@ -93,68 +89,88 @@ function opsKeyboard() {
   return Markup.inlineKeyboard(rows);
 }
 
-// —— public-ish (allowlist) ——
+function userHelp() {
+  return (
+    `TPlus — sparse Starship flight alerts\n\n` +
+    `/missions — list flights\n` +
+    `/mission <n> — browse nominal T+\n` +
+    `/eta — countdown to NET\n` +
+    `/status — flight clock (if live)\n` +
+    `/help — this message\n\n` +
+    `Unofficial; not affiliated with SpaceX.`
+  );
+}
+
+function opsHelp() {
+  return (
+    userHelp() +
+    `\n\nOps (admin)\n` +
+    `/ops — milestone buttons\n` +
+    `/note <text> — freeform alert\n` +
+    `/broadcast <text> — announcement\n` +
+    `/hype <hours> — e.g. /hype 48\n` +
+    `/mission use <n> — set active flight`
+  );
+}
+
+// —— subscribers ——
 
 bot.command("start", async (ctx) => {
-  if (!requireUser(ctx)) {
-    await ctx.reply("TPlus is private (allowlist only).");
+  const id = ctx.from.id;
+  if (!canEnroll(id)) {
+    await ctx.reply("Enrollment is closed. Contact the operator.");
     return;
   }
-  enrollUser(ctx.from.id, {
+  enrollUser(id, {
     username: ctx.from.username || null,
     first_name: ctx.from.first_name || null,
   });
-  reloadSubscribers();
+  const n = reloadSubscribers();
   const st = session.status();
+  const admin = isAdmin(id);
   await ctx.reply(
-    `Subscribed to TPlus.\n` +
+    `Subscribed to TPlus (${n} subscribers).\n` +
       `Active: ${st.missionName || "—"}\n\n` +
-      `/missions — archive\n` +
-      `/mission <n> — timeline\n` +
-      `/eta — time until NET\n` +
-      `/status — flight clock\n` +
-      `/help — commands\n\n` +
-      `Ops: /ops /note /broadcast /hype /mission use <n>`,
+      (admin ? opsHelp() : userHelp()),
   );
 });
 
 bot.command("help", async (ctx) => {
-  if (!requireUser(ctx)) return;
-  await ctx.reply(
-    `TPlus — sparse Starship flight alerts (Cue)\n\n` +
-      `Everyone (allowlist)\n` +
-      `/missions — list flights\n` +
-      `/mission <n|id> — browse nominal T+\n` +
-      `/eta — countdown to NET\n` +
-      `/status — live T+ if liftoff marked\n\n` +
-      `Ops\n` +
-      `/ops — milestone buttons\n` +
-      `/note <text> — freeform alert (all subscribers)\n` +
-      `/broadcast <text> — announcement\n` +
-      `/hype <hours> — e.g. /hype 48\n` +
-      `/mission use <n> — set active flight for ops/eta\n\n` +
-      `Unofficial; not affiliated with SpaceX.`,
-  );
+  await ctx.reply(isAdmin(ctx.from.id) ? opsHelp() : userHelp());
 });
 
 bot.command("missions", async (ctx) => {
-  if (!requireUser(ctx)) return;
+  // browse: any enrolled user, or anyone if open
+  if (!canEnroll(ctx.from.id) && !isAdmin(ctx.from.id)) {
+    await ctx.reply("Use /start first.");
+    return;
+  }
   const list = session.formatMissionList();
   await ctx.reply(`Missions (* = default)\n${list}\n\n/mission <n> to browse`);
 });
 
 bot.command("mission", async (ctx) => {
-  if (!requireUser(ctx)) return;
-  const raw = (ctx.message.text || "").replace(/^\/mission(@\w+)?\s*/i, "").trim();
+  if (!canEnroll(ctx.from.id) && !isAdmin(ctx.from.id)) {
+    await ctx.reply("Use /start first.");
+    return;
+  }
+  const raw = (ctx.message.text || "")
+    .replace(/^\/mission(@\w+)?\s*/i, "")
+    .trim();
   if (!raw) {
     const st = session.status();
     await ctx.reply(
       `Active: ${st.missionName || "—"}\n` +
-        `Use /mission <n> to browse or /mission use <n> to switch ops.`,
+        `/mission <n> to browse` +
+        (isAdmin(ctx.from.id) ? ` · /mission use <n> to switch ops` : ""),
     );
     return;
   }
   if (raw.toLowerCase().startsWith("use ")) {
+    if (!requireAdmin(ctx)) {
+      await ctx.reply("Admin only.");
+      return;
+    }
     const ref = raw.slice(4).trim();
     const r = session.loadMission(ref);
     if (!r.ok) {
@@ -165,24 +181,15 @@ bot.command("mission", async (ctx) => {
     return;
   }
   const text = session.formatTimeline(raw);
-  // Telegram message limit ~4096
-  if (text.length > 3500) {
-    await ctx.reply(text.slice(0, 3500) + "\n…");
-  } else {
-    await ctx.reply(text);
-  }
+  await ctx.reply(text.length > 3500 ? text.slice(0, 3500) + "\n…" : text);
 });
 
 bot.command("eta", async (ctx) => {
-  if (!requireUser(ctx)) return;
   const st = session.status();
-  await ctx.reply(
-    `${st.missionName || "Mission"}\n${st.etaText}`,
-  );
+  await ctx.reply(`${st.missionName || "Mission"}\n${st.etaText}`);
 });
 
 bot.command("status", async (ctx) => {
-  if (!requireUser(ctx)) return;
   const st = session.status();
   await ctx.reply(
     `${st.missionName || "Starship"}\n` +
@@ -193,11 +200,11 @@ bot.command("status", async (ctx) => {
   );
 });
 
-// —— ops ——
+// —— admin ops ——
 
 bot.command("ops", async (ctx) => {
-  if (!requireUser(ctx)) {
-    await ctx.reply("Not allowlisted.");
+  if (!requireAdmin(ctx)) {
+    await ctx.reply("Admin only.");
     return;
   }
   const st = session.status();
@@ -205,7 +212,10 @@ bot.command("ops", async (ctx) => {
 });
 
 bot.command("note", async (ctx) => {
-  if (!requireUser(ctx)) return;
+  if (!requireAdmin(ctx)) {
+    await ctx.reply("Admin only.");
+    return;
+  }
   const text = (ctx.message.text || "").replace(/^\/note(@\w+)?\s*/i, "").trim();
   if (!text) {
     await ctx.reply("Usage: /note <text>");
@@ -217,17 +227,15 @@ bot.command("note", async (ctx) => {
     return;
   }
   const alertText = r.alerts[0]?.text || text;
-  await fanOut(alertText);
-  if (runtime.deliveryMode === "none") {
-    await ctx.reply(`(delivery none) ${alertText}`);
-  } else if (runtime.deliveryMode === "telegram") {
-    // operator is a subscriber if enrolled; confirm
-    await ctx.reply(`Sent (${reloadSubscribers()} subscribers).`);
-  }
+  const { n } = await fanOut(alertText);
+  await ctx.reply(`Sent to ${n} subscriber(s).`);
 });
 
 bot.command("broadcast", async (ctx) => {
-  if (!requireUser(ctx)) return;
+  if (!requireAdmin(ctx)) {
+    await ctx.reply("Admin only.");
+    return;
+  }
   const text = (ctx.message.text || "")
     .replace(/^\/broadcast(@\w+)?\s*/i, "")
     .trim();
@@ -241,16 +249,15 @@ bot.command("broadcast", async (ctx) => {
     return;
   }
   const alertText = r.alerts[0]?.text || text;
-  await fanOut(alertText);
-  if (runtime.deliveryMode !== "telegram") {
-    await ctx.reply(alertText);
-  } else {
-    await ctx.reply(`Broadcast sent.`);
-  }
+  const { n } = await fanOut(alertText);
+  await ctx.reply(`Broadcast to ${n} subscriber(s).`);
 });
 
 bot.command("hype", async (ctx) => {
-  if (!requireUser(ctx)) return;
+  if (!requireAdmin(ctx)) {
+    await ctx.reply("Admin only.");
+    return;
+  }
   const raw = (ctx.message.text || "").replace(/^\/hype(@\w+)?\s*/i, "").trim();
   const hours = raw ? Number(raw) : 48;
   if (!Number.isFinite(hours) || hours <= 0) {
@@ -263,17 +270,13 @@ bot.command("hype", async (ctx) => {
     return;
   }
   const alertText = r.alerts[0]?.text || r.label;
-  await fanOut(alertText);
-  if (runtime.deliveryMode !== "telegram") {
-    await ctx.reply(alertText);
-  } else {
-    await ctx.reply(`Hype sent (${hours}h template).`);
-  }
+  const { n } = await fanOut(alertText);
+  await ctx.reply(`Hype sent to ${n} subscriber(s).`);
 });
 
 bot.on("callback_query", async (ctx) => {
-  if (!requireUser(ctx)) {
-    await ctx.answerCbQuery("Not allowed");
+  if (!requireAdmin(ctx)) {
+    await ctx.answerCbQuery("Admin only");
     return;
   }
   const data = ctx.callbackQuery.data || "";
@@ -308,18 +311,16 @@ bot.on("callback_query", async (ctx) => {
   }
 
   await ctx.answerCbQuery("ok");
-  await fanOut(alertText);
-  // Always show ops feedback with delta
-  await ctx.reply(`${alertText}${extra}`);
+  const { n } = await fanOut(alertText);
+  await ctx.reply(`${alertText}${extra}\n→ ${n} subscriber(s)`);
 });
 
 bot.launch().then(() => {
   const st = session.status();
   console.log(
-    `TPlus bot · mission=${st.missionName} · delivery=${runtime.deliveryMode} · allowlist=${config.telegramAllowlist.join(",") || "(empty)"} · subscribers=${reloadSubscribers()}`,
-  );
-  console.log(
-    "Commands: /start /help /missions /mission /eta /status /ops /note /broadcast /hype",
+    `TPlus bot · mission=${st.missionName} · delivery=${runtime.deliveryMode} · ` +
+      `admins=${config.adminIds.join(",") || "(none=all ops)"} · ` +
+      `enrollOpen=${config.enrollOpen} · subscribers=${reloadSubscribers()}`,
   );
 });
 

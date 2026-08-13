@@ -39,7 +39,7 @@ Downstream apps can brand separately and run one Cue worker instance per domain.
 - Explicit runtime posture (`MQTT_SOURCE`, `DELIVERY_MODE`) — no silent defaults  
 - Offline file replay for regression and evaluation  
 - Local MQTT publish path for capture-driven integration tests  
-- Minimal allowlisted Telegram enrollment (`data/users.json`)  
+- Telegram: open or closed enrollment (`data/users.json`); admin ids for ops  
 - Human-in-the-loop inject for domains without a public machine feed  
 
 ---
@@ -153,8 +153,10 @@ See [`.env.example`](./.env.example).
 | `MQTT_SOURCE` | `live` \| `local` |
 | `DELIVERY_MODE` | `telegram` \| `log` \| `none` |
 | `TELEGRAM_TOKEN` | Bot API token |
-| `TELEGRAM_ALLOWLIST` | Comma-separated chat ids (delivery + enrollment + ops) |
-| `SUBSCRIBER_IDS` | Optional seed subscriber ids |
+| `TELEGRAM_ADMIN_IDS` | Ops admins (comma-separated). Alias: `TELEGRAM_ALLOWLIST` |
+| `ENROLL_OPEN` | `true` (default): anyone `/start`s. `false`: admin-only enroll |
+| `SUBSCRIBER_IDS` | Optional seed subscriber ids (file store) |
+| Subscribers | `data/users.json` — delivery targets (not the admin list alone) |
 | `OPENF1_USERNAME` / `OPENF1_PASSWORD` | Live OpenF1 MQTT (`f1` + `MQTT_SOURCE=live`) |
 | `MQTT_LOCAL_HOST` / `MQTT_LOCAL_PORT` | Local broker (default `localhost:1883`) |
 | `ENGINE_DOMAIN` | Domain pack (`f1` \| `starship`, default `f1`) |

@@ -1,6 +1,9 @@
 /**
- * Minimal subscriber store — JSON file, no Redis/SQLite.
- * /start enrolls allowlisted users; SUBSCRIBER_IDS seeds the file.
+ * Subscriber store — JSON file on disk.
+ *
+ * - Subscribers: anyone who /start (if ENROLL_OPEN) or SUBSCRIBER_IDS / seeds
+ * - Admins: TELEGRAM_ADMIN_IDS or TELEGRAM_ALLOWLIST — ops commands only
+ * - Delivery targets = users.json (not the admin list alone)
  */
 
 import fs from "fs";
@@ -25,17 +28,19 @@ function writeRaw(data) {
   fs.writeFileSync(config.usersFile, JSON.stringify(data, null, 2));
 }
 
-/** Seed from env + return Map user_id -> { user_id } */
+/** Seed admins + SUBSCRIBER_IDS into the file so they receive alerts. */
 export function loadSubscribers() {
   const data = readRaw();
   const map = new Map();
+  const now = new Date().toISOString();
 
-  for (const id of [
-    ...config.subscriberSeedIds,
-    ...config.telegramAllowlist,
-  ]) {
+  for (const id of [...config.adminIds, ...config.subscriberSeedIds]) {
     if (!data.users[id]) {
-      data.users[id] = { user_id: id, enrolledAt: new Date().toISOString() };
+      data.users[id] = {
+        user_id: id,
+        enrolledAt: now,
+        role: config.adminIds.includes(id) ? "admin" : "subscriber",
+      };
     }
   }
 
@@ -51,17 +56,43 @@ export function loadSubscribers() {
 export function enrollUser(userId, meta = {}) {
   const data = readRaw();
   const id = Number(userId);
+  const isAdmin = config.adminIds.includes(id);
   data.users[id] = {
     user_id: id,
     enrolledAt: data.users[id]?.enrolledAt || new Date().toISOString(),
+    role: isAdmin ? "admin" : "subscriber",
     ...meta,
   };
   writeRaw(data);
   return data.users[id];
 }
 
-export function isAllowed(userId) {
+export function isAdmin(userId) {
   const id = Number(userId);
-  if (config.telegramAllowlist.length === 0) return true;
-  return config.telegramAllowlist.includes(id);
+  if (!config.adminIds.length) {
+    // No admins configured → treat everyone as admin (dev convenience)
+    return true;
+  }
+  return config.adminIds.includes(id);
+}
+
+/** @deprecated use isAdmin for ops; enrollment uses canEnroll */
+export function isAllowed(userId) {
+  return isAdmin(userId);
+}
+
+/**
+ * Who may /start and become a subscriber.
+ * - ENROLL_OPEN=true (default): anyone
+ * - ENROLL_OPEN=false: only admins (private beta)
+ */
+export function canEnroll(userId) {
+  if (config.enrollOpen) return true;
+  return isAdmin(userId);
+}
+
+export function isSubscriber(userId) {
+  const id = Number(userId);
+  const data = readRaw();
+  return Boolean(data.users[id]);
 }

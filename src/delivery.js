@@ -1,10 +1,13 @@
 /**
- * Outbound messages: telegram | log | none (+ allowlist).
+ * Outbound messages: telegram | log | none.
+ *
+ * Does NOT filter by admin allowlist — fan-out targets come from the
+ * subscriber store (data/users.json). Ops gating is separate (isAdmin).
  */
 
 /**
  * @param {import('telegraf').Telegraf|null} bot
- * @param {{ deliveryMode: string, telegramAllowlist: number[] }} runtime
+ * @param {{ deliveryMode: string }} runtime
  * @param {number|string} userId
  * @param {string} text
  */
@@ -12,7 +15,6 @@ export async function deliver(bot, runtime, userId, text) {
   const message = String(text ?? "").trim();
   if (!message) return { ok: false, reason: "empty" };
 
-  const uid = Number(userId);
   const mode = runtime.deliveryMode;
 
   if (mode === "none") return { ok: true, reason: "none" };
@@ -20,14 +22,6 @@ export async function deliver(bot, runtime, userId, text) {
   if (mode === "log") {
     console.log(`[deliver:log] user=${userId} ${message.replace(/\n/g, " | ")}`);
     return { ok: true, reason: "log" };
-  }
-
-  if (
-    runtime.telegramAllowlist.length > 0 &&
-    !runtime.telegramAllowlist.includes(uid)
-  ) {
-    console.log(`[deliver:skip-allowlist] user=${userId}`);
-    return { ok: false, reason: "allowlist" };
   }
 
   if (!bot) {
