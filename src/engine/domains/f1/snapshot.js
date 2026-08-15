@@ -3,6 +3,7 @@
  */
 
 import { ROSTER_2026 } from "./roster.js";
+import { meetingMeta, parseLivetimingPath } from "./meeting-meta.js";
 
 /** @typedef {'unknown'|'race'|'qualifying'} SessionKind */
 
@@ -10,6 +11,9 @@ export function createF1State() {
   return {
     sessionKey: null,
     meetingKey: null,
+    /** Human label e.g. "Chinese GP" */
+    meetingName: null,
+    circuitShortName: null,
     sessionActive: false,
     trackStatus: null, // green | yellow | red | vsc | safety_car | chequered
     /** @type {SessionKind} */
@@ -102,7 +106,10 @@ export function reduceF1(state, event, opts = {}) {
 
   const p = event.payload || {};
   if (p.session_key != null) next.sessionKey = p.session_key;
-  if (p.meeting_key != null) next.meetingKey = p.meeting_key;
+  if (p.meeting_key != null) {
+    next.meetingKey = p.meeting_key;
+    applyMeetingKeyFallback(next);
+  }
   if (event.t != null) next.lastEventT = event.t;
 
   // Session change → reset dynamic maps (keep drivers if same meeting)
@@ -129,12 +136,29 @@ export function reduceF1(state, event, opts = {}) {
     next.completeLapCount = 0;
     next.sessionName = null;
     next.sessionType = null;
+    next.meetingName = null;
+    next.circuitShortName = null;
     if (!next.sessionKindForced) next.sessionKind = "unknown";
   }
 
   switch (event.type) {
+    case "f1.meetings": {
+      applyMeetingPayload(next, p);
+      break;
+    }
     case "f1.sessions": {
       applySessionsMeta(next, p);
+      break;
+    }
+    case "f1.team_radio": {
+      // Livetiming URLs often encode meeting + session when MQTT omits v1/meetings
+      const parsed = parseLivetimingPath(p.recording_url);
+      if (parsed?.meetingName && !next.meetingName) {
+        next.meetingName = parsed.meetingName;
+      }
+      if (parsed?.sessionName && !next.sessionName) {
+        next.sessionName = parsed.sessionName;
+      }
       break;
     }
     case "f1.drivers": {
@@ -210,6 +234,33 @@ export function reduceF1(state, event, opts = {}) {
   return next;
 }
 
+function applyMeetingPayload(state, p) {
+  const name =
+    p.meeting_name ||
+    p.meeting_official_name ||
+    p.meeting_code ||
+    null;
+  if (name) state.meetingName = String(name).replace(/_/g, " ");
+  if (p.circuit_short_name) {
+    state.circuitShortName = String(p.circuit_short_name);
+  }
+  if (p.location && !state.circuitShortName) {
+    state.circuitShortName = String(p.location);
+  }
+  applyMeetingKeyFallback(state);
+}
+
+function applyMeetingKeyFallback(state) {
+  if (state.meetingName) return;
+  const meta = meetingMeta(state.meetingKey);
+  if (meta) {
+    state.meetingName = meta.name;
+    if (!state.circuitShortName && meta.circuit) {
+      state.circuitShortName = meta.circuit;
+    }
+  }
+}
+
 function applySessionsMeta(state, p) {
   const name = p.session_name || p.session_type || p.name || null;
   if (name) {
@@ -225,6 +276,36 @@ function applySessionsMeta(state, p) {
   } else if (/SPRINT/i.test(u) && !/QUAL|SHOOTOUT/.test(u)) {
     state.sessionKind = "race";
   }
+}
+
+/**
+ * Short context for alerts: "Chinese GP · Q1"
+ * @param {object} state
+ * @param {{ label?: string|null }} [extra]
+ */
+export function sessionContext(state, extra = {}) {
+  const bits = [];
+  if (state?.meetingName) bits.push(state.meetingName);
+  else if (state?.circuitShortName) bits.push(state.circuitShortName);
+  const phase =
+    extra.label ||
+    (state?.sessionKind === "qualifying" || (state?.segment || 0) >= 1
+      ? segmentPhaseLabel(state)
+      : state?.sessionName || null);
+  if (phase) bits.push(phase);
+  return bits.join(" · ");
+}
+
+function segmentPhaseLabel(state) {
+  if (state?.sessionKind === "qualifying" || (state?.segment || 0) >= 2) {
+    const seg = state.segment || 1;
+    if (seg === 1) return "Q1";
+    if (seg === 2) return "Q2";
+    if (seg === 3) return "Q3";
+  }
+  if (state?.sessionName) return state.sessionName;
+  if (state?.sessionKind === "race") return "Race";
+  return null;
 }
 
 function applyLap(state, p, t) {

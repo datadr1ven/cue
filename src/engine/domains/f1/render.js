@@ -2,45 +2,89 @@
  * Template render only (no LLM).
  */
 
+/** Shown on session / segment openers only — not every alert. */
+export const TELEMETRY_DISCLAIMER_SHORT =
+  "Live timing · unofficial · order can lag";
+
 /**
  * @param {import('../../types.js').Moment} moment
  * @param {object} state
  */
 export function renderF1Moment(moment, state) {
   const d = moment.data || {};
+  const head = ctxPrefix(d, state);
 
   switch (moment.type) {
     case "session.started":
-      return `🚦 Session started${d.message?.includes("Q") ? ` (${d.message})` : ""}`;
+      return withHead(
+        head,
+        withDisclaimer(
+          `🚦 Session started${d.message?.includes("Q") ? ` (${d.message})` : ""}`,
+        ),
+      );
 
     case "quali.segment_start":
-      return `🚦 ${d.label || "Qualifying"} started`;
+      return withHead(
+        head,
+        withDisclaimer(`🚦 ${d.label || "Qualifying"} started`),
+      );
 
     case "quali.session_best": {
+      // Time loop is source of truth; timing board / position can lag
       const prev =
         d.prevDriverName && d.prevTimeSec != null
           ? ` (was ${d.prevDriverName} ${formatLapTime(d.prevTimeSec)})`
           : "";
-      return `⏱️ ${d.label ? d.label + " · " : ""}Session best: ${d.driverName} ${d.timeLabel || formatLapTime(d.timeSec)}${prev}`;
+      const tyre =
+        d.compound && String(d.compound).toUpperCase() !== "SOFT"
+          ? ` · ${d.compound}`
+          : "";
+      // Position feed often trails the timing loop (especially early / out-laps).
+      // Only annotate when the driver is "on the board" in a useful way.
+      let board = "";
+      if (d.boardPos != null && d.boardPos >= 1 && d.boardPos <= 10) {
+        board = ` · board P${d.boardPos}`;
+        if (
+          d.boardPos !== 1 &&
+          d.boardLeaderName &&
+          d.boardLeaderName !== d.driverName
+        ) {
+          // Short cross-check only — full disclaimer is on session start
+          board += ` (board P1: ${d.boardLeaderName})`;
+        }
+      }
+      return withHead(
+        head,
+        `⏱️ Fastest lap: ${d.driverName} ${d.timeLabel || formatLapTime(d.timeSec)}${prev}${tyre}${board}`,
+      );
     }
 
     case "quali.chequered":
-      return finishLine(
-        `🏁 ${d.label || "Qualifying"} chequered`,
-        d.top5,
+      return withHead(
+        head,
+        finishLine(`🏁 ${d.label || "Qualifying"} chequered`, d.top5),
       );
 
     case "quali.cut": {
-      const out =
-        d.outNames?.length > 0
-          ? ` · out: ${d.outNames.slice(0, 6).join(", ")}${d.outNames.length > 6 ? "…" : ""}`
-          : "";
-      const thru =
-        d.throughNames?.length > 0
-          ? d.throughNames.slice(0, 8).join(", ") +
-            (d.throughNames.length > 8 ? "…" : "")
+      // Emphasize who is out — the drama of the cut line
+      const outNames = d.outNames || [];
+      const outLine =
+        outNames.length > 0
+          ? outNames.slice(0, 8).join(", ") +
+            (outNames.length > 8 ? "…" : "")
           : "—";
-      return `📋 ${d.label} over → ${d.nextLabel || "next"}\nThrough: ${thru}${out}`;
+      const nOut = d.outCount ?? outNames.length;
+      const nThru = d.throughCount ?? d.throughNames?.length;
+      const thruHint =
+        nThru != null
+          ? ` · ${nThru} through to ${d.nextLabel || "next"}`
+          : d.nextLabel
+            ? ` · rest → ${d.nextLabel}`
+            : "";
+      return withHead(
+        head,
+        `📋 ${d.label} over — out (${nOut || outNames.length}):\n${outLine}${thruHint}`,
+      );
     }
 
     case "quali.pole": {
@@ -48,32 +92,44 @@ export function renderF1Moment(moment, state) {
         d.top3?.length > 0
           ? d.top3.map((x) => `P${x.pos} ${x.name}`).join(" · ")
           : d.poleName || "";
-      return `🥇 Pole: ${d.poleName || "—"}${top ? `\n${top}` : ""}`;
+      return withHead(
+        head,
+        `🥇 Pole: ${d.poleName || "—"}${top ? `\n${top}` : ""}`,
+      );
     }
 
     case "session.finished":
-      return finishLine("Session finished", d.top5);
+      return withHead(head, finishLine("Session finished", d.top5));
 
     case "session.chequered":
-      return finishLine("🏁 Chequered flag", d.top5 || formatLeader(d));
+      return withHead(
+        head,
+        finishLine("🏁 Chequered flag", d.top5 || formatLeader(d)),
+      );
 
     case "flag.vsc":
-      return `⚠️ VSC deployed${leaderClause(d)}`;
+      return withHead(head, `⚠️ VSC deployed${leaderClause(d)}`);
 
     case "flag.safety_car":
-      return `🚨 Safety car deployed${leaderClause(d)}`;
+      return withHead(head, `🚨 Safety car deployed${leaderClause(d)}`);
 
     case "flag.red":
-      return `🔴 Red flag — ${shortMsg(d.message)}`;
+      return withHead(head, `🔴 Red flag — ${shortMsg(d.message)}`);
 
     case "order.leader_change":
-      return `👑 New leader: ${d.driverName} (was P${d.fromPos}${
-        d.prevLeaderName ? `, was ${d.prevLeaderName}` : ""
-      })${top3clause(d.top3)}`;
+      return withHead(
+        head,
+        `👑 New leader: ${d.driverName} (was P${d.fromPos}${
+          d.prevLeaderName ? `, was ${d.prevLeaderName}` : ""
+        })${top3clause(d.top3)}`,
+      );
 
     case "order.big_swing": {
       const dir = d.gained > 0 ? "up" : "down";
-      return `📊 ${d.driverName} ${dir} P${d.fromPos}→P${d.toPos}`;
+      return withHead(
+        head,
+        `📊 ${d.driverName} ${dir} P${d.fromPos}→P${d.toPos}`,
+      );
     }
 
     case "strategy.pit": {
@@ -86,30 +142,58 @@ export function renderF1Moment(moment, state) {
           ? `under ${d.trackStatus}`
           : null,
       ].filter(Boolean);
-      return bits.join(" · ");
+      return withHead(head, bits.join(" · "));
     }
 
     case "penalty.time":
-      return `⚖️ ${shortMsg(d.message)}`;
+      return withHead(head, `⚖️ ${shortMsg(d.message)}`);
 
     case "stewards.investigation":
-      return `🔍 ${shortMsg(d.message)}`;
+      return withHead(head, `🔍 ${shortMsg(d.message)}`);
 
     case "radio.clip": {
       const ctx = [
         d.driverName,
         d.position != null ? `P${d.position}` : null,
+        d.compound && String(d.compound).toUpperCase() !== "SOFT"
+          ? d.compound
+          : null,
         d.trackStatus && d.trackStatus !== "green" ? d.trackStatus : null,
         d.leaderName ? `leader ${d.leaderName}` : null,
       ]
         .filter(Boolean)
         .join(" · ");
-      return `📻 Team radio — ${ctx}${d.url ? `\n${d.url}` : ""}`;
+      return withHead(
+        head,
+        `📻 Team radio — ${ctx}${d.url ? `\n${d.url}` : ""}`,
+      );
     }
 
     default:
-      return d.message ? shortMsg(d.message) : moment.type;
+      return withHead(
+        head,
+        d.message ? shortMsg(d.message) : moment.type,
+      );
   }
+}
+
+function ctxPrefix(d, state) {
+  if (d.context) return d.context;
+  const bits = [];
+  if (state?.meetingName) bits.push(state.meetingName);
+  if (d.label) bits.push(d.label);
+  return bits.join(" · ") || "";
+}
+
+function withHead(head, body) {
+  if (!head) return body;
+  // Avoid "Chinese GP · Q1 · 🚦 Q1 started" doubling when body already has label
+  if (body.includes(head)) return body;
+  return `${head}\n${body}`;
+}
+
+function withDisclaimer(body) {
+  return `${body}\n${TELEMETRY_DISCLAIMER_SHORT}`;
 }
 
 function leaderClause(d) {

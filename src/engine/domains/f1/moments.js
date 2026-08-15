@@ -5,7 +5,12 @@
  */
 
 import { driverLabel } from "./roster.js";
-import { isQualifyingMode, isRaceStyleMode, orderedField } from "./snapshot.js";
+import {
+  isQualifyingMode,
+  isRaceStyleMode,
+  orderedField,
+  sessionContext,
+} from "./snapshot.js";
 
 const SESSION_BEST_COOLDOWN_MS = 20_000;
 
@@ -62,6 +67,7 @@ function fromRaceControl(prev, next, p, t) {
           segment: seg,
           label: segmentLabel(seg),
           message: msg,
+          ...contextFields(next, segmentLabel(seg)),
         },
       });
     } else {
@@ -70,7 +76,7 @@ function fromRaceControl(prev, next, p, t) {
         type: "session.started",
         severity: 7,
         t,
-        data: { message: msg },
+        data: { message: msg, ...contextFields(next) },
       });
     }
   }
@@ -256,6 +262,15 @@ function fromLap(prev, next, p, t) {
     return [];
   }
 
+  const boardPos = next.position[best.driver];
+  const stint = next.stints[best.driver];
+  const compound = stint?.compound && stint.compound !== "UNKNOWN"
+    ? stint.compound
+    : null;
+  // Board order often lags the timing loop — surface both
+  const boardTop3 = topN(next, 3);
+  const boardLeader = next.leader != null ? driverLabel(next, next.leader) : null;
+
   return [
     {
       id: `session-best-${best.driver}-${best.timeSec}-${best.lap ?? t}`,
@@ -275,6 +290,11 @@ function fromLap(prev, next, p, t) {
         prevTimeSec: best.prevTimeSec,
         segment: next.segment || null,
         label: segmentLabel(next.segment || 1),
+        boardPos: boardPos != null ? Number(boardPos) : null,
+        boardLeaderName: boardLeader,
+        boardTop3,
+        compound,
+        ...contextFields(next, segmentLabel(next.segment || 1)),
       },
     },
   ];
@@ -380,21 +400,31 @@ function fromPit(prev, next, p, t) {
 function fromRadio(state, p, t) {
   const num = Number(p.driver_number);
   const pos = state.position[num];
+  const stint = state.stints[num];
+  const compound =
+    stint?.compound && stint.compound !== "UNKNOWN" ? stint.compound : null;
+  // Default floor is 6 — was 5 so radios never fired
+  const severity = isQualifyingMode(state) || state.sessionKind === "qualifying"
+    ? 6
+    : 6;
   return [
     {
       id: `radio-${num}-${p.recording_url || t}`,
       type: "radio.clip",
-      severity: 5,
+      severity,
       t,
       entities: [num],
       data: {
         driver: num,
         driverName: driverLabel(state, num),
         url: p.recording_url,
-        position: pos,
+        position: pos != null ? Number(pos) : null,
         trackStatus: state.trackStatus,
         leaderName:
           state.leader != null ? driverLabel(state, state.leader) : null,
+        compound,
+        label: segmentLabel(state.segment || 1),
+        ...contextFields(state),
       },
     },
   ];
@@ -402,7 +432,8 @@ function fromRadio(state, p, t) {
 
 function buildCutMoment(state, order, endedSegment, t) {
   const field = order || [];
-  const advanceN = endedSegment <= 1 ? Math.min(15, field.length) : Math.min(10, field.length);
+  const advanceN =
+    endedSegment <= 1 ? Math.min(15, field.length) : Math.min(10, field.length);
   const through = enrichOrder(state, field.slice(0, advanceN));
   const outList = enrichOrder(state, field.slice(advanceN));
   const label = segmentLabel(endedSegment);
@@ -422,6 +453,9 @@ function buildCutMoment(state, order, endedSegment, t) {
         out: outList,
         throughNames: through.map((x) => x.name).slice(0, 15),
         outNames: outList.map((x) => x.name).slice(0, 10),
+        throughCount: through.length,
+        outCount: outList.length,
+        ...contextFields(state, label),
       },
     },
   ];
@@ -442,9 +476,19 @@ function buildPoleMoment(state, order, t) {
         poleName: pole?.name || null,
         top3: top.slice(0, 3),
         top10: top,
+        ...contextFields(state, "Q3"),
       },
     },
   ];
+}
+
+function contextFields(state, label = null) {
+  const ctx = sessionContext(state, label ? { label } : {});
+  return {
+    context: ctx || null,
+    meetingName: state.meetingName || null,
+    circuitShortName: state.circuitShortName || null,
+  };
 }
 
 function enrichOrder(state, rows) {

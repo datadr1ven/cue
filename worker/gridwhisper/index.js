@@ -162,6 +162,8 @@ function helpText() {
     `/status — am I subscribed?\n` +
     `/stop — unsubscribe\n` +
     `/help — this message\n\n` +
+    `Alerts use live timing telemetry — not an official F1 feed. ` +
+    `Lap times, order, and standings can lag or be incomplete.\n\n` +
     `Unofficial; not affiliated with Formula 1.`
   );
 }

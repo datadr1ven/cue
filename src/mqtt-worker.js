@@ -23,7 +23,7 @@ export const MQTT_TOPICS = [
   "v1/session_result",
   "v1/starting_grid",
   "v1/sessions",
-  "v1/meetings",
+  "v1/meetings", // event / circuit name when feed provides it
   "v1/laps", // quali session-best
 ];
 

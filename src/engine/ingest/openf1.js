@@ -38,6 +38,7 @@ const ACTIVE = new Set([
   "f1.team_radio",
   "f1.session_result",
   "f1.sessions",
+  "f1.meetings",
   "f1.laps", // session-best in qualifying
 ]);
 
