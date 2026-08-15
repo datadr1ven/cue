@@ -91,7 +91,14 @@ export function logRuntimeBanner(runtime) {
     runtime.deliveryMode === "http" && runtime.deliverUrl
       ? ` deliver=${runtime.deliverUrl}`
       : "";
+  const tagRaw = process.env.ALERT_TAG;
+  let tagNote = "";
+  if (tagRaw != null && String(tagRaw).trim() !== "") {
+    tagNote = ` tag=${String(tagRaw).trim()}`;
+  } else if (runtime.mqttSource === "local") {
+    tagNote = " tag=🧪 REPLAY (auto for local MQTT; ALERT_TAG=off to disable)";
+  }
   console.log(
-    `Cue worker: MQTT=${runtime.mqttSource} DELIVERY=${runtime.deliveryMode}${allow}${http}`,
+    `Cue worker: MQTT=${runtime.mqttSource} DELIVERY=${runtime.deliveryMode}${allow}${http}${tagNote}`,
   );
 }

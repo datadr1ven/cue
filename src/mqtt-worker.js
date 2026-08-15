@@ -7,7 +7,7 @@ import axios from "axios";
 import { Telegraf } from "telegraf";
 import { config, requireTelegramToken } from "./config.js";
 import { getRuntime, getMqttOptions, logRuntimeBanner } from "./runtime.js";
-import { deliver, deliverHttp } from "./delivery.js";
+import { deliver, deliverHttp, applyAlertTag } from "./delivery.js";
 import { loadSubscribers } from "./users.js";
 import { createPipeline } from "./engine/pipeline.js";
 import { expandOpenF1Line } from "./engine/ingest/openf1.js";
@@ -88,8 +88,12 @@ function scheduleReconnect() {
 }
 
 async function fanOut(alert) {
+  const text = applyAlertTag(alert.text, {
+    mqttSource: runtime?.mqttSource,
+  });
+
   if (runtime.deliveryMode === "http") {
-    const r = await deliverHttp(alert.text);
+    const r = await deliverHttp(text);
     if (r.ok) {
       console.log(
         `[deliver:http] → ${r.delivered ?? "?"}/${r.total ?? "?"} subscribers`,
@@ -101,17 +105,17 @@ async function fanOut(alert) {
   }
 
   if (runtime.deliveryMode === "log" || runtime.deliveryMode === "none") {
-    await deliver(bot, runtime, 0, alert.text);
+    await deliver(bot, runtime, 0, text);
     return;
   }
 
   const users = [...usersCache.values()];
   if (users.length === 0) {
-    console.log(`[no-subscribers] ${alert.text.replace(/\n/g, " | ")}`);
+    console.log(`[no-subscribers] ${text.replace(/\n/g, " | ")}`);
     return;
   }
   for (const user of users) {
-    await deliver(bot, runtime, user.user_id, alert.text);
+    await deliver(bot, runtime, user.user_id, text);
   }
 }
 

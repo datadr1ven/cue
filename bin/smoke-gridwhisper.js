@@ -23,7 +23,7 @@ assert(
 );
 assert(cmds.length === 4, "exactly 4 user commands (no prefs)");
 
-const { deliverHttp } = await import("../src/delivery.js");
+const { deliverHttp, applyAlertTag } = await import("../src/delivery.js");
 
 const empty = await deliverHttp("");
 assert(empty.ok === false && empty.reason === "empty", "deliverHttp empty");
@@ -32,6 +32,22 @@ const missing = await deliverHttp("hi", { url: null, secret: null });
 assert(
   missing.ok === false && missing.reason === "missing-url-or-secret",
   "deliverHttp needs url+secret",
+);
+
+const tagged = applyAlertTag("hello", { mqttSource: "local" });
+assert(tagged.startsWith("🧪 REPLAY"), "local MQTT tags replay");
+assert(tagged.includes("hello"), "tag preserves body");
+const live = applyAlertTag("hello", { mqttSource: "live" });
+assert(live === "hello", "live MQTT untagged by default");
+assert(
+  applyAlertTag("hello", { mqttSource: "local", tag: "off" }) === "hello",
+  "ALERT_TAG=off disables",
+);
+assert(
+  applyAlertTag("x", { mqttSource: "local", tag: "🧪 TEST" }).startsWith(
+    "🧪 TEST",
+  ),
+  "explicit tag",
 );
 
 // Runtime accepts http when env is set before modules load config.

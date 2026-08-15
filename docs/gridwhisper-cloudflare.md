@@ -131,6 +131,17 @@ curl -s -X POST "$GW_URL/deliver" \
 
 Chunk 2 wires the MQTT worker to this endpoint automatically.
 
+## Admin ops (Telegram)
+
+Set secret `TELEGRAM_ADMIN_IDS` to your numeric user id(s). Then:
+
+| Command | Effect |
+|---------|--------|
+| `/note <text>` | Freeform alert to all KV subscribers |
+| `/broadcast <text>` | Announcement to all subscribers |
+
+User `/` menu stays enroll-only; ops are admin-only (not in the public menu).
+
 ## Race day (laptop MQTT → Worker)
 
 Subscribers stay in KV. Your laptop never needs the user list.
@@ -145,6 +156,23 @@ cd cue
 
 npm run worker:live:http
 ```
+
+### Replay / test tag
+
+Local MQTT captures auto-prefix Telegram text with `🧪 REPLAY` so friends know it’s not live.
+
+```bash
+# default when MQTT_SOURCE=local
+npm run worker:local:http   # → 🧪 REPLAY\n…
+
+# custom tag
+ALERT_TAG="🧪 China Q1 dry-run" MQTT_SOURCE=local DELIVERY_MODE=http …
+
+# disable
+ALERT_TAG=off MQTT_SOURCE=local …
+```
+
+Live (`MQTT_SOURCE=live`) has **no** tag unless you set `ALERT_TAG`.
 
 Or:
 

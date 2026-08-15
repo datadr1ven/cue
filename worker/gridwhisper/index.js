@@ -2,6 +2,7 @@
  * Cloudflare Worker — GridWhisper Telegram (enroll + deliver).
  *
  * Always-on surface: webhook for /start · /help · /status · /stop.
+ * Admins (TELEGRAM_ADMIN_IDS): /note · /broadcast
  * Race-day MQTT (laptop) POSTs alerts to POST /deliver; this worker fans out.
  *
  * Bindings (wrangler.gridwhisper.toml):
@@ -9,7 +10,7 @@
  * Secrets:
  *   TELEGRAM_TOKEN
  *   DELIVER_SECRET        (Bearer for /deliver)
- *   TELEGRAM_ADMIN_IDS    (optional; for future ops)
+ *   TELEGRAM_ADMIN_IDS    (comma-separated; required for /note /broadcast)
  * Vars:
  *   ENROLL_OPEN=true
  *   WEBHOOK_SECRET        (optional path secret)
@@ -153,8 +154,8 @@ async function ensureCommands(env) {
   }
 }
 
-function helpText() {
-  return (
+function helpText(admin = false) {
+  let s =
     `GridWhisper — sparse F1 race alerts\n\n` +
     `High-signal moments only (overtakes, pits, flags, session turns).\n` +
     `No feed spam.\n\n` +
@@ -164,8 +165,14 @@ function helpText() {
     `/help — this message\n\n` +
     `Alerts use live timing telemetry — not an official F1 feed. ` +
     `Lap times, order, and standings can lag or be incomplete.\n\n` +
-    `Unofficial; not affiliated with Formula 1.`
-  );
+    `Unofficial; not affiliated with Formula 1.`;
+  if (admin) {
+    s +=
+      `\n\nOps (admin)\n` +
+      `/note <text> — freeform alert to all subscribers\n` +
+      `/broadcast <text> — announcement to all subscribers`;
+  }
+  return s;
 }
 
 function stripCmd(text, name) {
@@ -178,6 +185,7 @@ async function handleMessage(env, kv, message) {
   const userId = message.from?.id;
   const text = (message?.text || "").trim();
   if (!text.startsWith("/")) return;
+  const admin = isAdmin(env, userId);
 
   if (text.startsWith("/start")) {
     if (!canEnroll(env, userId)) {
@@ -192,13 +200,13 @@ async function handleMessage(env, kv, message) {
       env,
       chatId,
       `Subscribed to GridWhisper (${n} subscriber${n === 1 ? "" : "s"}).\n\n` +
-        helpText(),
+        helpText(admin),
     );
     return;
   }
 
   if (text.startsWith("/help")) {
-    await reply(env, chatId, helpText());
+    await reply(env, chatId, helpText(admin));
     return;
   }
 
@@ -234,6 +242,36 @@ async function handleMessage(env, kv, message) {
       env,
       chatId,
       `Unsubscribed. (${n} remaining)\n/start anytime to rejoin.`,
+    );
+    return;
+  }
+
+  if (text.startsWith("/note") || text.startsWith("/broadcast")) {
+    if (!admin) {
+      await reply(env, chatId, "Admin only.");
+      return;
+    }
+    const kind = text.startsWith("/note") ? "note" : "broadcast";
+    const body = stripCmd(text, kind);
+    if (!body) {
+      await reply(
+        env,
+        chatId,
+        kind === "note"
+          ? "Usage: /note <text>"
+          : "Usage: /broadcast <text>",
+      );
+      return;
+    }
+    const alertText =
+      kind === "note" ? `📝 ${body}` : `📢 ${body}`;
+    const { n, total } = await fanOut(env, kv, alertText);
+    await reply(
+      env,
+      chatId,
+      kind === "note"
+        ? `Note sent to ${n}/${total} subscriber(s).`
+        : `Broadcast sent to ${n}/${total} subscriber(s).`,
     );
     return;
   }

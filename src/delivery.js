@@ -9,6 +9,41 @@
 import { config } from "./config.js";
 
 /**
+ * Prefix outbound alerts for replay/test vs live.
+ *
+ * - ALERT_TAG=…        → use that string (e.g. "🧪 REPLAY")
+ * - ALERT_TAG=off      → never tag
+ * - unset + MQTT local → "🧪 REPLAY" (safe default for capture replays)
+ * - unset + MQTT live  → no tag
+ *
+ * @param {string} text
+ * @param {{ mqttSource?: string|null, tag?: string|null }} [opts]
+ */
+export function applyAlertTag(text, opts = {}) {
+  const message = String(text ?? "").trim();
+  if (!message) return message;
+
+  const off = (v) =>
+    ["0", "false", "off", "none", "no"].includes(String(v).toLowerCase());
+
+  let tag = null;
+  if (opts.tag != null && String(opts.tag).trim() !== "") {
+    tag = off(opts.tag) ? null : String(opts.tag).trim();
+  } else {
+    const raw = process.env.ALERT_TAG;
+    if (raw != null && String(raw).trim() !== "") {
+      tag = off(raw) ? null : String(raw).trim();
+    } else if (opts.mqttSource === "local") {
+      tag = "🧪 REPLAY";
+    }
+  }
+
+  if (!tag) return message;
+  if (message.startsWith(tag) || message.startsWith("🧪 REPLAY")) return message;
+  return `${tag}\n${message}`;
+}
+
+/**
  * Fan-out via GridWhisper (or compatible) CF Worker.
  * @param {string} text
  * @param {{ photoFileId?: string|null, url?: string|null, secret?: string|null }} [opts]
