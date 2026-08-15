@@ -21,6 +21,25 @@ Laptop (quali / race)
 
 TPlus stays a separate worker (`wrangler.toml` / `tplus`).
 
+## Autodeploy (GitHub Actions)
+
+Workflow [`.github/workflows/deploy-gridwhisper.yml`](../.github/workflows/deploy-gridwhisper.yml) deploys on push to `main` when the **Worker surface** changes:
+
+- `worker/gridwhisper/**`
+- `wrangler.gridwhisper.toml`
+- `src/gridwhisper-commands.js`
+- `package.json` / lockfile / the workflow itself
+
+Uses the same GitHub secrets as TPlus: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
+
+**Not** redeployed by this workflow: F1 engine / moments (`src/engine/**`). Those run on your laptop via MQTT → `POST /deliver`. Pull + restart the local worker for those.
+
+Manual deploy anytime: **Actions → Deploy GridWhisper → Run workflow**, or:
+
+```bash
+npx wrangler deploy -c wrangler.gridwhisper.toml
+```
+
 ## Prerequisites
 
 - Cloudflare account  

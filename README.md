@@ -264,6 +264,9 @@ npm run smoke:gridwhisper
 npx wrangler deploy -c wrangler.gridwhisper.toml
 ```
 
+**Autodeploy:** same GitHub secrets as TPlus (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).  
+Workflow [`.github/workflows/deploy-gridwhisper.yml`](./.github/workflows/deploy-gridwhisper.yml) deploys on push to `main` when Worker paths change (`worker/gridwhisper/**`, wrangler config, command list). F1 engine changes are laptop-only — no CF redeploy.
+
 | Command | Role |
 |---------|------|
 | `/start` · `/stop` | Subscribe / unsubscribe |
