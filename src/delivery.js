@@ -1,7 +1,62 @@
 /**
- * Outbound messages: telegram | log | none.
+ * Outbound messages: telegram | http | log | none.
  * Optional photo via Telegram file_id (same bot must have received the file).
+ *
+ * http mode: POST once to CF Worker /deliver (Worker fans out from KV).
+ * Use deliverHttp() from the MQTT worker; per-user deliver() is for telegram/log.
  */
+
+import { config } from "./config.js";
+
+/**
+ * Fan-out via GridWhisper (or compatible) CF Worker.
+ * @param {string} text
+ * @param {{ photoFileId?: string|null, url?: string|null, secret?: string|null }} [opts]
+ * @returns {Promise<{ ok: boolean, delivered?: number, total?: number, reason?: string, error?: string }>}
+ */
+export async function deliverHttp(text, opts = {}) {
+  const message = String(text ?? "").trim();
+  const photoFileId = opts.photoFileId || null;
+  if (!message && !photoFileId) return { ok: false, reason: "empty" };
+
+  const url = opts.url || config.deliverUrl;
+  const secret = opts.secret || config.deliverSecret;
+  if (!url || !secret) {
+    return { ok: false, reason: "missing-url-or-secret" };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: message || undefined,
+        photoFileId: photoFileId || undefined,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error(`❌ deliverHttp ${res.status}:`, body);
+      return {
+        ok: false,
+        reason: "http-error",
+        error: body?.error || String(res.status),
+      };
+    }
+    return {
+      ok: true,
+      reason: "http",
+      delivered: body.delivered,
+      total: body.total,
+    };
+  } catch (error) {
+    console.error(`❌ deliverHttp:`, error.message);
+    return { ok: false, reason: "error", error: error.message };
+  }
+}
 
 /**
  * @param {import('telegraf').Telegraf|null} bot

@@ -265,6 +265,14 @@ npx wrangler deploy -c wrangler.gridwhisper.toml
 | `/status` · `/help` | Enrollment check · how it works |
 | `POST /deliver` | Trusted race-day inject (Bearer `DELIVER_SECRET`) |
 
+Race day on a laptop (MQTT → Cue → Worker fan-out):
+
+```bash
+DELIVER_URL=https://gridwhisper.<account>.workers.dev/deliver \
+DELIVER_SECRET=… \
+npm run worker:live:http
+```
+
 ---
 
 ## Disclaimer

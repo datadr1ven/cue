@@ -7,7 +7,7 @@ import axios from "axios";
 import { Telegraf } from "telegraf";
 import { config, requireTelegramToken } from "./config.js";
 import { getRuntime, getMqttOptions, logRuntimeBanner } from "./runtime.js";
-import { deliver } from "./delivery.js";
+import { deliver, deliverHttp } from "./delivery.js";
 import { loadSubscribers } from "./users.js";
 import { createPipeline } from "./engine/pipeline.js";
 import { expandOpenF1Line } from "./engine/ingest/openf1.js";
@@ -87,6 +87,23 @@ function scheduleReconnect() {
 }
 
 async function fanOut(alert) {
+  if (runtime.deliveryMode === "http") {
+    const r = await deliverHttp(alert.text);
+    if (r.ok) {
+      console.log(
+        `[deliver:http] → ${r.delivered ?? "?"}/${r.total ?? "?"} subscribers`,
+      );
+    } else {
+      console.error(`[deliver:http] failed: ${r.reason} ${r.error || ""}`);
+    }
+    return;
+  }
+
+  if (runtime.deliveryMode === "log" || runtime.deliveryMode === "none") {
+    await deliver(bot, runtime, 0, alert.text);
+    return;
+  }
+
   const users = [...usersCache.values()];
   if (users.length === 0) {
     console.log(`[no-subscribers] ${alert.text.replace(/\n/g, " | ")}`);
@@ -128,7 +145,7 @@ export async function startMqttWorker() {
   runtime = getRuntime();
   logRuntimeBanner(runtime);
 
-  if (runtime.deliveryMode === "telegram" || process.env.TELEGRAM_TOKEN) {
+  if (runtime.deliveryMode === "telegram") {
     requireTelegramToken();
     bot = new Telegraf(config.telegramToken);
   }
@@ -142,8 +159,16 @@ export async function startMqttWorker() {
     }
   }
 
-  usersCache = loadSubscribers();
-  console.log(`👥 Subscribers: ${usersCache.size}`);
+  if (runtime.deliveryMode === "http") {
+    console.log("👥 Subscribers: managed by CF Worker KV (POST /deliver)");
+    usersCache = new Map();
+  } else if (runtime.deliveryMode === "telegram") {
+    usersCache = loadSubscribers();
+    console.log(`👥 Subscribers: ${usersCache.size} (local file)`);
+  } else {
+    usersCache = new Map();
+    console.log(`👥 Subscribers: n/a (DELIVERY_MODE=${runtime.deliveryMode})`);
+  }
 
   pipeline = createPipeline({
     domain: config.engineDomain,

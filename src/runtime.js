@@ -5,7 +5,8 @@
 import { config } from "./config.js";
 
 const MQTT_SOURCES = ["live", "local"];
-const DELIVERY_MODES = ["telegram", "log", "none"];
+/** telegram = local Telegraf fan-out; http = POST to CF Worker /deliver */
+const DELIVERY_MODES = ["telegram", "http", "log", "none"];
 
 function requireEnum(name, allowed) {
   const raw = process.env[name];
@@ -35,15 +36,24 @@ export function getRuntime() {
       );
     }
   }
+  if (delivery.value === "http") {
+    if (!config.deliverUrl) {
+      problems.push("DELIVER_URL is required when DELIVERY_MODE=http");
+    }
+    if (!config.deliverSecret) {
+      problems.push("DELIVER_SECRET is required when DELIVERY_MODE=http");
+    }
+  }
   if (problems.length) {
     throw new Error(
-      `Runtime incomplete:\n  - ${problems.join("\n  - ")}\nExample:\n  MQTT_SOURCE=local DELIVERY_MODE=log npm run worker`,
+      `Runtime incomplete:\n  - ${problems.join("\n  - ")}\nExample:\n  MQTT_SOURCE=local DELIVERY_MODE=log npm run worker\n  MQTT_SOURCE=live DELIVERY_MODE=http DELIVER_URL=… DELIVER_SECRET=… npm run worker`,
     );
   }
   return {
     mqttSource: mqtt.value,
     deliveryMode: delivery.value,
     telegramAllowlist: config.telegramAllowlist,
+    deliverUrl: config.deliverUrl,
   };
 }
 
@@ -77,7 +87,11 @@ export function logRuntimeBanner(runtime) {
     runtime.telegramAllowlist.length > 0
       ? ` allowlist=[${runtime.telegramAllowlist.join(",")}]`
       : "";
+  const http =
+    runtime.deliveryMode === "http" && runtime.deliverUrl
+      ? ` deliver=${runtime.deliverUrl}`
+      : "";
   console.log(
-    `Cue worker: MQTT=${runtime.mqttSource} DELIVERY=${runtime.deliveryMode}${allow}`,
+    `Cue worker: MQTT=${runtime.mqttSource} DELIVERY=${runtime.deliveryMode}${allow}${http}`,
   );
 }

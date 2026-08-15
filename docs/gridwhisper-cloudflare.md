@@ -112,20 +112,43 @@ curl -s -X POST "$GW_URL/deliver" \
 
 Chunk 2 wires the MQTT worker to this endpoint automatically.
 
-## Local MQTT (later)
+## Race day (laptop MQTT → Worker)
 
-On quali/race day:
+Subscribers stay in KV. Your laptop never needs the user list.
 
 ```bash
-# conceptual — implemented in a follow-up chunk
-DELIVERY_MODE=http \
-DELIVER_URL=https://gridwhisper….workers.dev/deliver \
-DELIVER_SECRET=… \
-MQTT_SOURCE=live \
-npm run worker
+cd cue
+# .env or export:
+#   OPENF1_USERNAME=…
+#   OPENF1_PASSWORD=…
+#   DELIVER_URL=https://gridwhisper.scenicminddigital.workers.dev/deliver
+#   DELIVER_SECRET=…   # same as wrangler secret
+
+npm run worker:live:http
 ```
 
-Until then, use log mode + the curl above to prove fan-out.
+Or:
+
+```bash
+MQTT_SOURCE=live DELIVERY_MODE=http \
+  DELIVER_URL=https://gridwhisper.scenicminddigital.workers.dev/deliver \
+  DELIVER_SECRET=… \
+  npm run worker
+```
+
+Offline practice (local broker + NDJSON publish):
+
+```bash
+# Terminal A: mosquitto
+# Terminal B:
+MQTT_SOURCE=local DELIVERY_MODE=http \
+  DELIVER_URL=https://gridwhisper….workers.dev/deliver \
+  DELIVER_SECRET=… \
+  npm run worker
+# Terminal C: npm run publish -- path/to/capture.ndjson
+```
+
+Each moment → one `POST /deliver` → Worker fans out to all KV subscribers.
 
 ## Vs old GridWhisper (Vercel)
 

@@ -50,6 +50,12 @@ export const config = {
     join(__dirname, "..", "data", "users.json"),
   engineDomain: process.env.ENGINE_DOMAIN || "f1",
   minSeverity: Number(process.env.ENGINE_MIN_SEVERITY || 6),
+  /**
+   * GridWhisper race-day: POST alerts to CF Worker /deliver
+   * (DELIVERY_MODE=http).
+   */
+  deliverUrl: process.env.DELIVER_URL || null,
+  deliverSecret: process.env.DELIVER_SECRET || null,
 };
 
 export function requireTelegramToken() {

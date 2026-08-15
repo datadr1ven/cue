@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * MQTT → Cue pipeline → delivery (telegram | log | none)
+ * MQTT → Cue pipeline → delivery (http | telegram | log | none)
  *
  *   MQTT_SOURCE=local DELIVERY_MODE=log npm run worker
  *   npm run worker:live:log
- *   npm run worker:live
+ *   # GridWhisper race day (CF fan-out):
+ *   DELIVER_URL=… DELIVER_SECRET=… npm run worker:live:http
  */
 
 import { startMqttWorker } from "../src/mqtt-worker.js";
