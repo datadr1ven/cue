@@ -37,6 +37,8 @@ const ACTIVE = new Set([
   "f1.weather",
   "f1.team_radio",
   "f1.session_result",
+  "f1.sessions",
+  "f1.laps", // session-best in qualifying
 ]);
 
 /**
@@ -61,13 +63,10 @@ export function normalizeOpenF1(line, opts = {}) {
   if (!payload || typeof payload !== "object") return null;
 
   const type = TOPIC_MAP[topic] || `f1.unknown:${topic}`;
-  if (!opts.keepAll && !ACTIVE.has(type) && !type.startsWith("f1.unknown")) {
-    // mapped but inactive (laps, championship, …)
-    if (type === "f1.laps" || type.startsWith("f1.championship") || type === "f1.overtakes") {
-      return null;
-    }
+  if (!opts.keepAll && !ACTIVE.has(type)) {
+    // mapped but inactive (championship, overtakes feed, …)
+    return null;
   }
-  if (!opts.keepAll && !ACTIVE.has(type)) return null;
 
   const t =
     payload.date ||

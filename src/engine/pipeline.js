@@ -9,9 +9,10 @@ import { createStarshipDomain } from "./domains/starship/index.js";
 
 /**
  * @param {string} name
+ * @param {import('./types.js').EngineConfig} config
  */
-function loadDomain(name) {
-  if (name === "f1") return createF1Domain();
+function loadDomain(name, config) {
+  if (name === "f1") return createF1Domain(config);
   if (name === "starship") return createStarshipDomain();
   throw new Error(
     `Unknown domain "${name}". Registered: f1, starship.`,
@@ -23,7 +24,7 @@ function loadDomain(name) {
  */
 export function createPipeline(configOverrides = {}) {
   const config = loadConfig(configOverrides);
-  const domain = loadDomain(config.domain);
+  const domain = loadDomain(config.domain, config);
   const gate = createGate(config);
   let state = domain.createState();
 

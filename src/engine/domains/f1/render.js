@@ -13,6 +13,44 @@ export function renderF1Moment(moment, state) {
     case "session.started":
       return `🚦 Session started${d.message?.includes("Q") ? ` (${d.message})` : ""}`;
 
+    case "quali.segment_start":
+      return `🚦 ${d.label || "Qualifying"} started`;
+
+    case "quali.session_best": {
+      const prev =
+        d.prevDriverName && d.prevTimeSec != null
+          ? ` (was ${d.prevDriverName} ${formatLapTime(d.prevTimeSec)})`
+          : "";
+      return `⏱️ ${d.label ? d.label + " · " : ""}Session best: ${d.driverName} ${d.timeLabel || formatLapTime(d.timeSec)}${prev}`;
+    }
+
+    case "quali.chequered":
+      return finishLine(
+        `🏁 ${d.label || "Qualifying"} chequered`,
+        d.top5,
+      );
+
+    case "quali.cut": {
+      const out =
+        d.outNames?.length > 0
+          ? ` · out: ${d.outNames.slice(0, 6).join(", ")}${d.outNames.length > 6 ? "…" : ""}`
+          : "";
+      const thru =
+        d.throughNames?.length > 0
+          ? d.throughNames.slice(0, 8).join(", ") +
+            (d.throughNames.length > 8 ? "…" : "")
+          : "—";
+      return `📋 ${d.label} over → ${d.nextLabel || "next"}\nThrough: ${thru}${out}`;
+    }
+
+    case "quali.pole": {
+      const top =
+        d.top3?.length > 0
+          ? d.top3.map((x) => `P${x.pos} ${x.name}`).join(" · ")
+          : d.poleName || "";
+      return `🥇 Pole: ${d.poleName || "—"}${top ? `\n${top}` : ""}`;
+    }
+
     case "session.finished":
       return finishLine("Session finished", d.top5);
 
@@ -101,4 +139,13 @@ function formatLeader(d) {
 function shortMsg(msg) {
   const s = String(msg || "").replace(/\s+/g, " ").trim();
   return s.length > 160 ? s.slice(0, 157) + "…" : s;
+}
+
+function formatLapTime(sec) {
+  const s = Number(sec);
+  if (!Number.isFinite(s)) return "?";
+  const m = Math.floor(s / 60);
+  const rem = s - m * 60;
+  if (m <= 0) return rem.toFixed(3);
+  return `${m}:${rem.toFixed(3).padStart(6, "0")}`;
 }

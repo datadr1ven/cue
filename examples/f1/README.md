@@ -13,6 +13,35 @@ Not full race dumps (those stay out of git — use your own captures for regress
 npm run replay -- examples/f1/smoke-two-alerts.ndjson
 ```
 
+### Full qualifying capture (sparse quali mode)
+
+Captures are **not** in this repo. Useful local trees:
+
+| Location | Examples |
+|----------|----------|
+| `~/testdata/` | `aus-qual.ndjson`, `cn-qual.ndjson`, `jp-day-2.ndjson`, `cn-fp1-and-sprintqual.ndjson` |
+| GridWhisper `latest-artifacts/` | `hungary-qual.ndjson`, `aus-qual.ndjson` |
+
+Force quali kind so Q1 is not treated like a race:
+
+```bash
+ENGINE_SESSION_KIND=qualifying npm run replay -- \
+  ~/testdata/cn-qual.ndjson
+
+# Clean-ish sessions land ~20–35 alerts: segment starts, session bests, cuts, pole, red/stewards
+# Combined days (fp3+qual) a bit higher. Not 100+ position thrash lines.
+```
+
+| File (testdata) | ~alerts @ sev 6 + forced quali | Notes |
+|-----------------|----------------------------------|--------|
+| `cn-qual.ndjson` | ~22 | Clean single quali — good first dual-watch |
+| `jp-day-2.ndjson` | ~30 | Practice+qual day; still sparse |
+| `aus-qual.ndjson` | ~33 | Red flags → extra segment_start |
+| `cn-fp1-and-sprintqual.ndjson` | ~35 | FP1 + sprint quali |
+| `aus-fp3-qual.ndjson` | ~49 | FP3+qual mashed; more reds/segments |
+
+Race captures leave `ENGINE_SESSION_KIND` unset (or `=race`).
+
 ## Local MQTT → log
 
 ```bash

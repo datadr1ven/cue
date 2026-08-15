@@ -1,9 +1,13 @@
 /**
  * Detect moments from (prevState, nextState, event).
- * High-signal only — soft-launch subset.
+ * Race: high-signal order / pits / flags.
+ * Qualifying: segment flow, session-best, cuts, pole — not position thrash.
  */
 
 import { driverLabel } from "./roster.js";
+import { isQualifyingMode, isRaceStyleMode, orderedField } from "./snapshot.js";
+
+const SESSION_BEST_COOLDOWN_MS = 20_000;
 
 /**
  * @param {object} prev
@@ -20,21 +24,16 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromRaceControl(prev, next, p, t));
   }
 
-  if (event.type === "f1.position") {
+  if (event.type === "f1.laps") {
+    moments.push(...fromLap(prev, next, p, t));
+  }
+
+  if (event.type === "f1.position" && isRaceStyleMode(next)) {
     moments.push(...fromPosition(prev, next, p, t));
   }
 
-  if (event.type === "f1.pit") {
+  if (event.type === "f1.pit" && allowPitMoments(next)) {
     moments.push(...fromPit(prev, next, p, t));
-  }
-
-  if (event.type === "f1.stints") {
-    const num = p.driver_number;
-    const st = next.stints[num];
-    if (st?._changed && p.compound && p.compound !== "UNKNOWN") {
-      // Only emit compound change if we also have a recent pit context — else low value
-      // Skip standalone stint spam; pit handler covers most strategy
-    }
   }
 
   if (event.type === "f1.team_radio") {
@@ -49,15 +48,44 @@ function fromRaceControl(prev, next, p, t) {
   const up = msg.toUpperCase();
   const flag = String(p.flag || "").toUpperCase();
   const out = [];
+  const quali = isQualifyingMode(next) || isQualifyingMode(prev);
 
   if (up.includes("SESSION STARTED")) {
-    out.push({
-      id: `session-started-${t}`,
-      type: "session.started",
-      severity: 7,
-      t,
-      data: { message: msg },
-    });
+    if (quali || next.segment >= 2 || next.sessionKind === "qualifying") {
+      const seg = next.segment || 1;
+      out.push({
+        id: `quali-seg-start-${seg}-${t}`,
+        type: "quali.segment_start",
+        severity: 7,
+        t,
+        data: {
+          segment: seg,
+          label: segmentLabel(seg),
+          message: msg,
+        },
+      });
+    } else {
+      out.push({
+        id: `session-started-${t}`,
+        type: "session.started",
+        severity: 7,
+        t,
+        data: { message: msg },
+      });
+    }
+  }
+
+  // Delayed Q-cut: previous chequered + new segment starting
+  if (
+    up.includes("SESSION STARTED") &&
+    prev.awaitingNextSegment &&
+    prev.orderAtChequered?.length &&
+    (prev.chequeredCount || 0) >= 1
+  ) {
+    const ended = prev.endedSegment || prev.segment || 1;
+    if (ended <= 2) {
+      out.push(...buildCutMoment(next, prev.orderAtChequered, ended, t));
+    }
   }
 
   if (up.includes("VSC DEPLOYED")) {
@@ -95,28 +123,75 @@ function fromRaceControl(prev, next, p, t) {
   }
 
   if (flag.includes("CHEQUERED") || up.includes("CHEQUERED FLAG")) {
-    out.push({
-      id: `chequered-${t}`,
-      type: "session.chequered",
-      severity: 9,
-      t,
-      data: {
-        message: msg,
-        top5: topN(next, 5),
-        leader: next.leader,
-        leaderName: next.leader != null ? driverLabel(next, next.leader) : null,
-      },
-    });
+    const seg = next.endedSegment || next.segment || 1;
+    const order = next.orderAtChequered || orderedField(next, 30);
+    const kind = next.sessionKind;
+
+    if (kind === "qualifying" || seg >= 2 || (kind === "unknown" && isShortSegment(next))) {
+      if (seg >= 3) {
+        out.push(...buildPoleMoment(next, order, t));
+      } else if (seg <= 2 && !next.awaitingNextSegment) {
+        // no next segment expected — emit cut immediately (rare)
+        out.push(...buildCutMoment(next, order, seg, t));
+      } else if (seg <= 2) {
+        // cut usually emitted on next SESSION STARTED; soft chequered note
+        out.push({
+          id: `quali-chequered-${seg}-${t}`,
+          type: "quali.chequered",
+          severity: 7,
+          t,
+          data: {
+            segment: seg,
+            label: segmentLabel(seg),
+            top5: enrichOrder(next, order.slice(0, 5)),
+          },
+        });
+      }
+    } else {
+      out.push({
+        id: `chequered-${t}`,
+        type: "session.chequered",
+        severity: 9,
+        t,
+        data: {
+          message: msg,
+          top5: topN(next, 5),
+          leader: next.leader,
+          leaderName: next.leader != null ? driverLabel(next, next.leader) : null,
+        },
+      });
+    }
   }
 
   if (up.includes("SESSION FINISHED") && !up.includes("CHEQUERED")) {
-    out.push({
-      id: `session-finished-${t}`,
-      type: "session.finished",
-      severity: 7,
-      t,
-      data: { message: msg, top5: topN(next, 5) },
-    });
+    // Quali: cut/pole cover the story; skip noisy finished lines
+    if (!isQualifyingMode(next) && next.sessionKind !== "qualifying") {
+      out.push({
+        id: `session-finished-${t}`,
+        type: "session.finished",
+        severity: 7,
+        t,
+        data: { message: msg, top5: topN(next, 5) },
+      });
+    }
+  }
+
+  // Final Q segment with no following SESSION STARTED: emit cut/pole on finished
+  if (
+    (up.includes("SESSION FINISHED") || flag.includes("CHEQUERED") || up.includes("CHEQUERED FLAG")) &&
+    (next.sessionKind === "qualifying" || (next.segment || 0) >= 2)
+  ) {
+    // Pole if Q3 just ended (chequered path handles seg>=3)
+    // Q1/Q2 cut without a following segment: if finished and awaiting and no more data later — handled by chequered soft + optional finished cut
+    if (
+      up.includes("SESSION FINISHED") &&
+      next.awaitingNextSegment &&
+      (next.endedSegment || 0) <= 2 &&
+      next.orderAtChequered?.length
+    ) {
+      // Don't double with delayed cut on next start; only if this looks like last segment of file
+      // Skip here — delayed cut on next start is primary. For Q3-less weekend edge, ignore.
+    }
   }
 
   // Don't treat CHEQUERED as red (string contains "RED")
@@ -144,7 +219,8 @@ function fromRaceControl(prev, next, p, t) {
       type: "penalty.time",
       severity: 8,
       t,
-      entities: p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
+      entities:
+        p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
       data: { message: msg },
     });
   } else if (/UNDER INVESTIGATION|WILL BE INVESTIGATED/.test(up)) {
@@ -153,14 +229,63 @@ function fromRaceControl(prev, next, p, t) {
       type: "stewards.investigation",
       severity: 7,
       t,
-      entities: p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
+      entities:
+        p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
       data: { message: msg },
     });
   }
 
-  // Avoid yellow-sector spam — not emitted
-
   return out;
+}
+
+function fromLap(prev, next, p, t) {
+  if (!next.sessionBest?._improved) return [];
+  // Only in known/inferred qualifying (not race, not unknown race distance)
+  if (!isQualifyingMode(next) && next.sessionKind !== "qualifying") return [];
+
+  const best = next.sessionBest;
+  if (prev.sessionBest && prev.sessionBest.timeSec === best.timeSec) return [];
+
+  const tMs = toMs(best.improvedAt || t) || 0;
+  const prevAt = toMs(prev.sessionBest?.improvedAt);
+  if (
+    prev.sessionBest?._improved &&
+    prevAt != null &&
+    tMs - prevAt < SESSION_BEST_COOLDOWN_MS
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      id: `session-best-${best.driver}-${best.timeSec}-${best.lap ?? t}`,
+      type: "quali.session_best",
+      severity: 7,
+      t: best.t || t,
+      entities: [best.driver],
+      data: {
+        driver: best.driver,
+        driverName: driverLabel(next, best.driver),
+        timeSec: best.timeSec,
+        timeLabel: formatLapTime(best.timeSec),
+        lap: best.lap,
+        prevDriver: best.prevDriver,
+        prevDriverName:
+          best.prevDriver != null ? driverLabel(next, best.prevDriver) : null,
+        prevTimeSec: best.prevTimeSec,
+        segment: next.segment || null,
+        label: segmentLabel(next.segment || 1),
+      },
+    },
+  ];
+}
+
+/** Pits: race, or unknown after we look race-like. Never in quali. */
+function allowPitMoments(state) {
+  if (isQualifyingMode(state) || state.sessionKind === "qualifying") return false;
+  if (state.sessionKind === "race") return true;
+  // unknown: allow once green has run long (race) — not early Q1
+  return (state.completeLapCount || 0) > 120;
 }
 
 function fromPosition(prev, next, p, t) {
@@ -170,7 +295,6 @@ function fromPosition(prev, next, p, t) {
   const out = [];
 
   if (oldPos == null) {
-    // First time we see this driver — only care if P1 settles after some data
     return out;
   }
 
@@ -197,23 +321,25 @@ function fromPosition(prev, next, p, t) {
     });
   }
 
-  // Big swing (≥3 places) — medium
-  const delta = Number(oldPos) - newPos; // positive = gained places
-  if (Math.abs(Number(oldPos) - newPos) >= 3) {
-    out.push({
-      id: `swing-${num}-${oldPos}-${newPos}-${t}`,
-      type: "order.big_swing",
-      severity: 6,
-      t,
-      entities: [num],
-      data: {
-        driver: num,
-        driverName: driverLabel(next, num),
-        fromPos: oldPos,
-        toPos: newPos,
-        gained: delta,
-      },
-    });
+  // Big swing — race only (provisional quali order thrashes constantly)
+  if (next.sessionKind === "race") {
+    const delta = Number(oldPos) - newPos; // positive = gained places
+    if (Math.abs(Number(oldPos) - newPos) >= 3) {
+      out.push({
+        id: `swing-${num}-${oldPos}-${newPos}-${t}`,
+        type: "order.big_swing",
+        severity: 6,
+        t,
+        entities: [num],
+        data: {
+          driver: num,
+          driverName: driverLabel(next, num),
+          fromPos: oldPos,
+          toPos: newPos,
+          gained: delta,
+        },
+      });
+    }
   }
 
   return out;
@@ -225,7 +351,6 @@ function fromPit(prev, next, p, t) {
   const leader = next.leader;
   const pos = next.position[num];
 
-  // Front-runners + anyone in top 10 get higher severity
   let severity = 5;
   if (pos != null && pos <= 3) severity = 7;
   else if (pos != null && pos <= 10) severity = 6;
@@ -259,7 +384,7 @@ function fromRadio(state, p, t) {
     {
       id: `radio-${num}-${p.recording_url || t}`,
       type: "radio.clip",
-      severity: 5, // below default minSeverity 6 — enable with --min-severity 5
+      severity: 5,
       t,
       entities: [num],
       data: {
@@ -275,16 +400,81 @@ function fromRadio(state, p, t) {
   ];
 }
 
+function buildCutMoment(state, order, endedSegment, t) {
+  const field = order || [];
+  const advanceN = endedSegment <= 1 ? Math.min(15, field.length) : Math.min(10, field.length);
+  const through = enrichOrder(state, field.slice(0, advanceN));
+  const outList = enrichOrder(state, field.slice(advanceN));
+  const label = segmentLabel(endedSegment);
+  const nextLabel = endedSegment <= 1 ? "Q2" : "Q3";
+
+  return [
+    {
+      id: `quali-cut-${endedSegment}-${t}`,
+      type: "quali.cut",
+      severity: 8,
+      t,
+      data: {
+        segment: endedSegment,
+        label,
+        nextLabel,
+        through,
+        out: outList,
+        throughNames: through.map((x) => x.name).slice(0, 15),
+        outNames: outList.map((x) => x.name).slice(0, 10),
+      },
+    },
+  ];
+}
+
+function buildPoleMoment(state, order, t) {
+  const top = enrichOrder(state, (order || []).slice(0, 10));
+  const pole = top[0] || null;
+  return [
+    {
+      id: `quali-pole-${t}`,
+      type: "quali.pole",
+      severity: 9,
+      t,
+      entities: pole ? [pole.driver] : [],
+      data: {
+        pole,
+        poleName: pole?.name || null,
+        top3: top.slice(0, 3),
+        top10: top,
+      },
+    },
+  ];
+}
+
+function enrichOrder(state, rows) {
+  return (rows || []).map((r) => ({
+    driver: r.driver,
+    pos: r.pos,
+    name: driverLabel(state, r.driver),
+  }));
+}
+
+function segmentLabel(seg) {
+  if (seg === 1) return "Q1";
+  if (seg === 2) return "Q2";
+  if (seg === 3) return "Q3";
+  return `Q${seg || "?"}`;
+}
+
+function isShortSegment(state) {
+  const startMs = toMs(state.segmentStartT);
+  const endMs = toMs(state.lastEventT);
+  if (startMs == null || endMs == null) return false;
+  const mins = (endMs - startMs) / 60000;
+  return mins > 0 && mins <= 35;
+}
+
 function topN(state, n) {
-  return Object.entries(state.position || {})
-    .map(([num, pos]) => ({
-      driver: Number(num),
-      pos: Number(pos),
-      name: driverLabel(state, num),
-    }))
-    .filter((r) => Number.isFinite(r.pos))
-    .sort((a, b) => a.pos - b.pos)
-    .slice(0, n);
+  return orderedField(state, n).map((r) => ({
+    ...r,
+    name: driverLabel(state, r.driver),
+  }));
 }
 
 function extractCarNumbers(msg) {
@@ -293,4 +483,19 @@ function extractCarNumbers(msg) {
   let m;
   while ((m = re.exec(msg))) nums.push(Number(m[1]));
   return nums;
+}
+
+function formatLapTime(sec) {
+  const s = Number(sec);
+  if (!Number.isFinite(s)) return "?";
+  const m = Math.floor(s / 60);
+  const rem = s - m * 60;
+  if (m <= 0) return rem.toFixed(3);
+  return `${m}:${rem.toFixed(3).padStart(6, "0")}`;
+}
+
+function toMs(t) {
+  if (t == null) return null;
+  const n = new Date(t).getTime();
+  return Number.isFinite(n) ? n : null;
 }

@@ -24,6 +24,7 @@ export const MQTT_TOPICS = [
   "v1/starting_grid",
   "v1/sessions",
   "v1/meetings",
+  "v1/laps", // quali session-best
 ];
 
 let client = null;

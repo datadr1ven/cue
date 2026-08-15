@@ -34,6 +34,14 @@ export function loadConfig(overrides = {}) {
     dedupeMs: envNum("ENGINE_DEDUPE_MS", 30_000),
     /** Max radios per driver per session window */
     radioCooldownMs: envNum("ENGINE_RADIO_COOLDOWN_MS", 120_000),
+    /**
+     * Force session kind for F1: race | qualifying.
+     * Empty = auto (multi-segment / short-to-chequered / SC heuristics).
+     */
+    sessionKind:
+      process.env.ENGINE_SESSION_KIND ||
+      process.env.ENGINE_SESSION_MODE ||
+      null,
     ...overrides,
   };
 }
