@@ -136,19 +136,27 @@ MQTT_SOURCE=live DELIVERY_MODE=http \
   npm run worker
 ```
 
-Offline practice (local broker + NDJSON publish):
+Offline practice (local broker + tiny fixture → **2** Telegram messages):
 
 ```bash
-# Terminal A: mosquitto
+# Terminal A: mosquitto (localhost:1883)
 # Terminal B:
 MQTT_SOURCE=local DELIVERY_MODE=http \
-  DELIVER_URL=https://gridwhisper….workers.dev/deliver \
+  DELIVER_URL=https://gridwhisper.scenicminddigital.workers.dev/deliver \
   DELIVER_SECRET=… \
   npm run worker
-# Terminal C: npm run publish -- path/to/capture.ndjson
+# Terminal C:
+npm run publish -- examples/f1/smoke-two-alerts.ndjson
 ```
 
+Fixture details: [`examples/f1/README.md`](../examples/f1/README.md).  
 Each moment → one `POST /deliver` → Worker fans out to all KV subscribers.
+
+Stdout-only check (no MQTT / Telegram):
+
+```bash
+npm run replay -- examples/f1/smoke-two-alerts.ndjson
+```
 
 ## Vs old GridWhisper (Vercel)
 

@@ -71,10 +71,15 @@ npm install
 OpenF1-style NDJSON through the **`f1`** domain:
 
 ```bash
+# Tiny synthetic sample (2 alerts @ default severity)
+npm run replay -- examples/f1/smoke-two-alerts.ndjson
+
 npm run replay -- path/to/capture.ndjson
 npm run replay -- path/to/capture.ndjson --min-severity 7
 npm run replay -- path/to/capture.ndjson --json
 ```
+
+See [`examples/f1/`](./examples/f1/) for the GridWhisper-oriented fixture (not a full race dump).
 
 ### MQTT worker (stream → deliver)
 

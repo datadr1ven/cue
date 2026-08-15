@@ -45,4 +45,30 @@ assert(
   "http is a planned delivery mode",
 );
 
+// Fixture: exactly two high-signal moments at default severity
+const { createPipeline } = await import("../src/engine/pipeline.js");
+const { readNdjsonEvents } = await import("../src/engine/ingest/ndjson.js");
+const { resolve, dirname, join } = await import("path");
+const { fileURLToPath } = await import("url");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const fixture = resolve(root, "examples/f1/smoke-two-alerts.ndjson");
+const pipeline = createPipeline({
+  domain: "f1",
+  source: "ndjson",
+  useLlm: false,
+  usePrefs: false,
+  minSeverity: 6,
+});
+let alerts = 0;
+const types = [];
+for await (const ev of readNdjsonEvents(fixture)) {
+  for (const a of pipeline.push(ev).alerts) {
+    alerts += 1;
+    types.push(a.moment.type);
+  }
+}
+assert(alerts === 2, `smoke fixture yields 2 alerts (got ${alerts}: ${types})`);
+assert(types.includes("session.started"), "session.started");
+assert(types.includes("flag.safety_car"), "flag.safety_car");
+
 console.log("OK smoke:gridwhisper");
