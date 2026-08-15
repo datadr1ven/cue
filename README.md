@@ -246,6 +246,27 @@ Local Node polling (`npm run starship:bot`) remains available for development; u
 
 ---
 
+## GridWhisper on Cloudflare (enroll + deliver)
+
+F1 product surface (rebuild): **webhook Worker + KV** for subscribe/unsubscribe; race-day MQTT stays on a laptop and fans out via `POST /deliver`.
+
+No per-user prefs in v1 — same sparse moment stream for everyone.
+
+See **[docs/gridwhisper-cloudflare.md](./docs/gridwhisper-cloudflare.md)**.
+
+```bash
+npm run smoke:gridwhisper
+npx wrangler deploy -c wrangler.gridwhisper.toml
+```
+
+| Command | Role |
+|---------|------|
+| `/start` · `/stop` | Subscribe / unsubscribe |
+| `/status` · `/help` | Enrollment check · how it works |
+| `POST /deliver` | Trusted race-day inject (Bearer `DELIVER_SECRET`) |
+
+---
+
 ## Disclaimer
 
 Cue is an independent project. It is not affiliated with Formula 1 companies, OpenF1, SpaceX, or other upstream data providers. Third-party marks remain the property of their owners. Use of live feeds and media links is subject to upstream terms.
