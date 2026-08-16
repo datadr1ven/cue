@@ -24,6 +24,20 @@ const SESSION_BEST_COOLDOWN_MS = 20_000;
 /** Race/sprint: top-5 board if quiet this long (event time). */
 export const ORDER_PULSE_MS = 12 * 60 * 1000;
 
+/**
+ * Big swing: sparse "that was a disaster / rocket" only.
+ * OpenF1 position ticks thrash at lights-out and under SC/VSC pits — a raw
+ * |Δ|≥3 on every message is noise (Aus GP: 30+ fake swings in ~30s).
+ */
+export const BIG_SWING_PLACES = 5;
+/** First this long after race start: only huge drops (anti-stall / pile-up). */
+export const BIG_SWING_OPENING_MS = 90_000;
+export const BIG_SWING_OPENING_DROP = 8;
+/** Skip expected board jumps right after that car's own pit. */
+export const BIG_SWING_PIT_IGNORE_MS = 45_000;
+/** One swing alert per driver this often (event time). */
+export const BIG_SWING_COOLDOWN_MS = 90_000;
+
 const ORDER_NOISE_TYPES = new Set([
   "order.leader_change",
   "order.big_swing",
@@ -158,6 +172,17 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
       lastOrderPulseT: t || next.lastOrderPulseT,
       lastOrderNoiseT: t || next.lastOrderNoiseT,
     };
+  }
+  for (const m of moments) {
+    if (m.type === "order.big_swing" && m.data?.driver != null) {
+      next = {
+        ...next,
+        lastBigSwingByDriver: {
+          ...(next.lastBigSwingByDriver || {}),
+          [m.data.driver]: t || next.lastBigSwingByDriver?.[m.data.driver],
+        },
+      };
+    }
   }
   if (radioInterest) {
     next = {
@@ -549,28 +574,71 @@ function fromPosition(prev, next, p, t) {
     });
   }
 
-  // Big swing — race only (provisional quali order thrashes constantly)
-  if (next.sessionKind === "race") {
+  // Big swing — race/sprint only; heavy filters (see BIG_SWING_* constants)
+  if (
+    (next.sessionKind === "race" || next.sessionKind === "sprint") &&
+    shouldEmitBigSwing(prev, next, num, Number(oldPos), newPos, t)
+  ) {
     const delta = Number(oldPos) - newPos; // positive = gained places
-    if (Math.abs(Number(oldPos) - newPos) >= 3) {
-      out.push({
-        id: `swing-${num}-${oldPos}-${newPos}-${t}`,
-        type: "order.big_swing",
-        severity: 6,
-        t,
-        entities: [num],
-        data: {
-          driver: num,
-          driverName: driverLabel(next, num),
-          fromPos: oldPos,
-          toPos: newPos,
-          gained: delta,
-        },
-      });
-    }
+    out.push({
+      id: `swing-${num}-${oldPos}-${newPos}-${t}`,
+      type: "order.big_swing",
+      severity: 6,
+      t,
+      entities: [num],
+      data: {
+        driver: num,
+        driverName: driverLabel(next, num),
+        fromPos: oldPos,
+        toPos: newPos,
+        gained: delta,
+      },
+    });
   }
 
   return out;
+}
+
+/**
+ * @param {object} prev
+ * @param {object} next
+ * @param {number} num
+ * @param {number} oldPos
+ * @param {number} newPos
+ * @param {string|null} t
+ */
+function shouldEmitBigSwing(prev, next, num, oldPos, newPos, t) {
+  const places = Math.abs(oldPos - newPos);
+  if (places < BIG_SWING_PLACES) return false;
+
+  // Pit / neutralisation cascades rewrite the board in seconds — not "swings".
+  const status = next.trackStatus || prev.trackStatus;
+  if (status && status !== "green" && status !== "yellow") return false;
+
+  const tMs = toMs(t);
+  if (tMs == null) return false;
+
+  // Own pit → big position jump is expected (and already a strategy.pit alert).
+  const pitT = next.lastPit?.[num]?.t || prev.lastPit?.[num]?.t;
+  const pitMs = toMs(pitT);
+  if (pitMs != null && tMs - pitMs >= 0 && tMs - pitMs < BIG_SWING_PIT_IGNORE_MS) {
+    return false;
+  }
+
+  // Lights-out thrash: many cars "gain" 5–10 places as the feed settles.
+  // Keep only disaster-scale drops (Russell anti-stall, pile-up).
+  const startMs = toMs(next.segmentStartT || prev.segmentStartT);
+  if (startMs != null && tMs - startMs >= 0 && tMs - startMs < BIG_SWING_OPENING_MS) {
+    const dropped = newPos - oldPos; // positive = lost places
+    if (dropped < BIG_SWING_OPENING_DROP) return false;
+  }
+
+  const lastMs = toMs(next.lastBigSwingByDriver?.[num] || prev.lastBigSwingByDriver?.[num]);
+  if (lastMs != null && tMs - lastMs >= 0 && tMs - lastMs < BIG_SWING_COOLDOWN_MS) {
+    return false;
+  }
+
+  return true;
 }
 
 /**

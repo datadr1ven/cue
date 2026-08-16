@@ -113,6 +113,8 @@ export function createF1State() {
     lastOrderNoiseT: null,
     /** Event-time of last order.snapshot pulse */
     lastOrderPulseT: null,
+    /** driver → event-time of last order.big_swing alert */
+    lastBigSwingByDriver: {},
     /** Radios emitted this session (hard cap) */
     radioEmitCount: 0,
     /** Event-time of last radio.clip we emitted */
@@ -188,6 +190,7 @@ export function reduceF1(state, event, opts = {}) {
     sessionBest: state.sessionBest ? { ...state.sessionBest } : null,
     maxLapByDriver: { ...(state.maxLapByDriver || {}) },
     lapFinishAt: { ...(state.lapFinishAt || {}) },
+    lastBigSwingByDriver: { ...(state.lastBigSwingByDriver || {}) },
   };
 
   if (opts.sessionKind && !next.sessionKindForced) {
@@ -239,6 +242,7 @@ export function reduceF1(state, event, opts = {}) {
     next.lastSessionBestAlertT = null;
     next.lastOrderNoiseT = null;
     next.lastOrderPulseT = null;
+    next.lastBigSwingByDriver = {};
     next.radioEmitCount = 0;
     next.lastRadioEmitT = null;
     next.lastRadioInterestT = null;
@@ -927,6 +931,7 @@ function applyRaceControl(state, p, t) {
     // Heartbeat silence clock starts at lights-out / restart
     state.lastOrderNoiseT = t || state.lastEventT;
     state.lastOrderPulseT = null;
+    state.lastBigSwingByDriver = {};
     // Fresh knockout segment (Q2/Q3): new radio budget
     if (isKnockoutMode(state) && state.segment > 1) {
       state.sessionBest = null;
