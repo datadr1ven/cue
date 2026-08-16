@@ -15,6 +15,7 @@ import {
   sessionContext,
   phaseLabel,
   buildPracticeRecap,
+  buildPitMoment,
 } from "./snapshot.js";
 
 const SESSION_BEST_COOLDOWN_MS = 20_000;
@@ -43,8 +44,27 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromPosition(prev, next, p, t));
   }
 
+  // Pits are deferred in reduce (pendingPits) until stint compound arrives
   if (event.type === "f1.pit" && allowPitMoments(next)) {
-    moments.push(...fromPit(prev, next, p, t));
+    // no immediate moment — see pendingPits + flushExpiredPits / _pitCombined
+  }
+
+  // Combined pit + new compound (usual path, often within ~0.2–5s)
+  if (
+    event.type === "f1.stints" &&
+    allowPitMoments(next) &&
+    next._pitCombined
+  ) {
+    const c = next._pitCombined;
+    moments.push(
+      buildPitMoment(
+        {
+          ...c,
+          driver: c.driver,
+        },
+        { compoundOn: c.compoundOn, state: next },
+      ),
+    );
   }
 
   if (event.type === "f1.team_radio" && !isPracticeMode(next)) {
@@ -399,38 +419,6 @@ function fromPosition(prev, next, p, t) {
   }
 
   return out;
-}
-
-function fromPit(prev, next, p, t) {
-  const num = Number(p.driver_number);
-  const stint = next.stints[num];
-  const leader = next.leader;
-  const pos = next.position[num];
-
-  let severity = 5;
-  if (pos != null && pos <= 3) severity = 7;
-  else if (pos != null && pos <= 10) severity = 6;
-  if (num === leader) severity = 7;
-
-  return [
-    {
-      id: `pit-${num}-${p.lap_number ?? t}`,
-      type: "strategy.pit",
-      severity,
-      t,
-      entities: [num],
-      data: {
-        driver: num,
-        driverName: driverLabel(next, num),
-        lap: p.lap_number,
-        stop: p.stop_duration,
-        lane: p.lane_duration ?? p.pit_duration,
-        compound: stint?.compound,
-        position: pos,
-        trackStatus: next.trackStatus,
-      },
-    },
-  ];
 }
 
 function fromRadio(state, p, t) {

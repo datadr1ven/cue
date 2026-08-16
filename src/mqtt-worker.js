@@ -42,6 +42,8 @@ let messageQueue = Promise.resolve();
 let startupBannerSent = false;
 let shuttingDown = false;
 let signalsHooked = false;
+/** Flush deferred pit→tyre combines */
+let pitFlushTimer = null;
 
 const maxReconnectAttemptsBeforeSlow = 10;
 const baseReconnectDelay = 1000;
@@ -195,15 +197,38 @@ async function onMessage(topic, buf) {
   for (const ev of expandOpenF1Line(line)) {
     const { alerts } = pipeline.push(ev);
     for (const alert of alerts) {
-      const ts = alert.moment.t
-        ? String(alert.moment.t).slice(11, 19)
-        : new Date().toISOString().slice(11, 19);
-      console.log(
-        `⚡ ${ts} [${alert.moment.severity}] ${alert.moment.type} ${alert.text.replace(/\n/g, " | ")}`,
-      );
-      await fanOut(alert);
+      await emitAlert(alert);
     }
   }
+}
+
+async function emitAlert(alert) {
+  const ts = alert.moment.t
+    ? String(alert.moment.t).slice(11, 19)
+    : new Date().toISOString().slice(11, 19);
+  console.log(
+    `⚡ ${ts} [${alert.moment.severity}] ${alert.moment.type} ${alert.text.replace(/\n/g, " | ")}`,
+  );
+  await fanOut(alert);
+}
+
+async function flushPendingPits() {
+  if (!pipeline?.flushPending || shuttingDown) return;
+  const { alerts } = pipeline.flushPending();
+  for (const alert of alerts) {
+    await emitAlert(alert);
+  }
+}
+
+function ensurePitFlushTimer() {
+  if (pitFlushTimer) return;
+  // ~5s wait for stint compound; poll often enough to flush timeouts promptly
+  pitFlushTimer = setInterval(() => {
+    messageQueue = messageQueue
+      .then(() => flushPendingPits())
+      .catch((e) => console.error("Pit flush error:", e));
+  }, 500);
+  if (typeof pitFlushTimer.unref === "function") pitFlushTimer.unref();
 }
 
 export async function startMqttWorker() {
@@ -292,6 +317,7 @@ export async function startMqttWorker() {
   });
 
   hookLifecycleSignals();
+  ensurePitFlushTimer();
 }
 
 /**
@@ -304,11 +330,20 @@ export async function stopMqttWorker(reason = "shutdown") {
   shuttingDown = true;
   intentionalDisconnect = true;
   clearReconnectTimer();
+  if (pitFlushTimer) {
+    clearInterval(pitFlushTimer);
+    pitFlushTimer = null;
+  }
   console.log(`🛑 Stopping MQTT worker (${reason})…`);
 
-  // Drain in-flight message handling, then announce offline
+  // Drain in-flight message handling, flush deferred pits, then announce offline
   try {
     await messageQueue;
+  } catch {
+    /* ignore */
+  }
+  try {
+    await flushPendingPits();
   } catch {
     /* ignore */
   }

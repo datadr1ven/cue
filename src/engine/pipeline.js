@@ -82,12 +82,43 @@ export function createPipeline(configOverrides = {}) {
     state = domain.createState();
   }
 
+  /**
+   * Emit deferred F1 pit alerts whose tyre compound never arrived (timeout).
+   * No-op for domains without flushPending.
+   * @param {number} [nowMs]
+   */
+  function flushPending(nowMs = Date.now()) {
+    if (typeof domain.flushPending !== "function") {
+      return { state, moments: [], alerts: [] };
+    }
+    const { state: next, moments: rawMoments } = domain.flushPending(
+      state,
+      nowMs,
+    );
+    state = next;
+    const moments = gate.filter(rawMoments, null);
+    /** @type {import('./types.js').Alert[]} */
+    const alerts = [];
+    for (const moment of moments) {
+      const text = domain.renderMoment(moment, state);
+      if (text && String(text).trim()) {
+        alerts.push({
+          moment,
+          text: String(text).trim(),
+          renderSource: "template",
+        });
+      }
+    }
+    return { state, moments, alerts };
+  }
+
   return {
     config,
     push,
     getState,
     replaceState,
     reset,
+    flushPending,
     domainName: config.domain,
   };
 }

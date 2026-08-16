@@ -2,6 +2,7 @@ import {
   createF1State,
   reduceF1,
   normalizeSessionKind,
+  flushExpiredPits,
 } from "./snapshot.js";
 import { detectF1Moments } from "./moments.js";
 import { renderF1Moment } from "./render.js";
@@ -25,6 +26,7 @@ export function createF1Domain(config = {}) {
       reduceF1(state, event, kind ? { sessionKind: kind } : {}),
     detectMoments: detectF1Moments,
     renderMoment: renderF1Moment,
+    flushPending: flushExpiredPits,
   };
 }
 

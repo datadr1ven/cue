@@ -147,11 +147,23 @@ export function renderF1Moment(moment, state) {
     }
 
     case "strategy.pit": {
+      // Prefer single line after short wait for stint feed; timeout → off only
+      let tyre = null;
+      if (d.compoundOff && d.compoundOn) {
+        tyre =
+          d.compoundOff === d.compoundOn
+            ? `fresh ${d.compoundOn}`
+            : `${d.compoundOff} → ${d.compoundOn}`;
+      } else if (d.compoundOn) {
+        tyre = `→ ${d.compoundOn}`;
+      } else if (d.compoundOff) {
+        tyre = `off ${d.compoundOff}`;
+      }
       const bits = [
-        `🛠️ ${d.driverName} pits`,
+        `🛠️ ${d.driverName || "Driver"} pits`,
         d.lap != null ? `lap ${d.lap}` : null,
-        d.compound ? `→ ${d.compound}` : null,
-        d.position != null ? `was P${d.position}` : null,
+        tyre,
+        d.positionIn != null ? `from P${d.positionIn}` : null,
         d.trackStatus && d.trackStatus !== "green"
           ? `under ${d.trackStatus}`
           : null,

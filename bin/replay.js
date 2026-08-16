@@ -50,30 +50,38 @@ async function main() {
   let alerts = 0;
   const byType = {};
 
+  function printAlert(alert) {
+    alerts += 1;
+    byType[alert.moment.type] = (byType[alert.moment.type] || 0) + 1;
+    if (args.json) {
+      console.log(
+        JSON.stringify({
+          t: alert.moment.t,
+          type: alert.moment.type,
+          severity: alert.moment.severity,
+          text: alert.text,
+        }),
+      );
+    } else {
+      const ts = alert.moment.t
+        ? String(alert.moment.t).slice(11, 19)
+        : "??:??:??";
+      console.log(
+        `${ts}  [${alert.moment.severity}] ${alert.moment.type.padEnd(22)} ${alert.text.replace(/\n/g, " | ")}`,
+      );
+    }
+  }
+
   for await (const ev of readNdjsonEvents(file)) {
     events += 1;
     const { alerts: batch } = pipeline.push(ev);
-    for (const alert of batch) {
-      alerts += 1;
-      byType[alert.moment.type] = (byType[alert.moment.type] || 0) + 1;
-      if (args.json) {
-        console.log(
-          JSON.stringify({
-            t: alert.moment.t,
-            type: alert.moment.type,
-            severity: alert.moment.severity,
-            text: alert.text,
-          }),
-        );
-      } else {
-        const ts = alert.moment.t
-          ? String(alert.moment.t).slice(11, 19)
-          : "??:??:??";
-        console.log(
-          `${ts}  [${alert.moment.severity}] ${alert.moment.type.padEnd(22)} ${alert.text.replace(/\n/g, " | ")}`,
-        );
-      }
-    }
+    for (const alert of batch) printAlert(alert);
+  }
+
+  // Offline: force-expire any pit still waiting on a stint compound
+  if (typeof pipeline.flushPending === "function") {
+    const { alerts: rest } = pipeline.flushPending(Date.now() + 60_000);
+    for (const alert of rest) printAlert(alert);
   }
 
   if (!args.json) {

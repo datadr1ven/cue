@@ -2,7 +2,7 @@
  * Pure-ish reduce: IngestEvent → next state.
  */
 
-import { ROSTER_2026 } from "./roster.js";
+import { ROSTER_2026, driverLabel } from "./roster.js";
 import { meetingMeta, parseLivetimingPath } from "./meeting-meta.js";
 
 /**
@@ -76,6 +76,13 @@ export function createF1State() {
     pitCounts: {},
     /** Distinct tyre compounds seen this session */
     compoundsSeen: [],
+    /**
+     * Open pits waiting for v1/stints compound (combine into one alert).
+     * driver_number → { wallMs, t, lap, stop, lane, compoundOff, positionIn, trackStatus }
+     */
+    pendingPits: {},
+    /** One-shot: set when stint update closes a pending pit (detector consumes). */
+    _pitCombined: null,
     leader: null,
     weather: null,
     lastEventT: null,
@@ -139,6 +146,8 @@ export function reduceF1(state, event, opts = {}) {
     compoundsSeen: Array.isArray(state.compoundsSeen)
       ? [...state.compoundsSeen]
       : [],
+    pendingPits: { ...(state.pendingPits || {}) },
+    _pitCombined: null,
     sessionBest: state.sessionBest ? { ...state.sessionBest } : null,
   };
 
@@ -172,6 +181,8 @@ export function reduceF1(state, event, opts = {}) {
     next.lastPit = {};
     next.pitCounts = {};
     next.compoundsSeen = [];
+    next.pendingPits = {};
+    next._pitCombined = null;
     next.leader = null;
     next.trackStatus = null;
     next.sessionActive = false;
@@ -243,6 +254,13 @@ export function reduceF1(state, event, opts = {}) {
     case "f1.pit": {
       const num = p.driver_number;
       if (num == null) break;
+      const compoundOff = state.stints[num]?.compound || null;
+      const positionIn =
+        next.position[num] != null
+          ? Number(next.position[num])
+          : state.position[num] != null
+            ? Number(state.position[num])
+            : null;
       next.lastPit[num] = {
         lap_number: p.lap_number,
         stop_duration: p.stop_duration,
@@ -250,6 +268,25 @@ export function reduceF1(state, event, opts = {}) {
         t: event.t,
       };
       next.pitCounts[num] = (next.pitCounts[num] || 0) + 1;
+      // Defer race/sprint pit alert until stint feed brings new compound (~0.2–5s)
+      // Practice / knockout: count only (no deferred alert)
+      if (
+        !isPracticeMode(next) &&
+        !isKnockoutMode(next) &&
+        !isQualifyingMode(next)
+      ) {
+        next.pendingPits[num] = {
+          wallMs: Date.now(),
+          t: event.t,
+          lap: p.lap_number ?? null,
+          stop: p.stop_duration ?? null,
+          lane: p.lane_duration ?? p.pit_duration ?? null,
+          compoundOff,
+          positionIn,
+          trackStatus: next.trackStatus,
+          driver: Number(num),
+        };
+      }
       break;
     }
     case "f1.stints": {
@@ -266,6 +303,22 @@ export function reduceF1(state, event, opts = {}) {
           prev.lap_start !== p.lap_start,
       };
       noteCompound(next, p.compound);
+      // Close deferred pit when a *new stint* lands (new compound and/or lap_start)
+      const pending = state.pendingPits?.[num] || next.pendingPits?.[num];
+      const newStint =
+        !prev ||
+        prev.compound !== p.compound ||
+        prev.lap_start !== p.lap_start;
+      if (pending && p.compound && p.compound !== "UNKNOWN" && newStint) {
+        next._pitCombined = {
+          ...pending,
+          compoundOn: p.compound,
+          lapOn: p.lap_start ?? pending.lap,
+        };
+        const rest = { ...next.pendingPits };
+        delete rest[num];
+        next.pendingPits = rest;
+      }
       break;
     }
     case "f1.laps": {
@@ -424,6 +477,72 @@ function noteCompound(state, compound) {
  *   mostStopsDrivers: number[],
  * }}
  */
+/** Max wait for v1/stints after pit before emitting without new compound. */
+export const PIT_COMPOUND_WAIT_MS = 5_000;
+
+/**
+ * Flush deferred pits whose stint compound never arrived in time.
+ * @param {object} state
+ * @param {number} [nowMs]
+ * @returns {{ state: object, moments: import('../../types.js').Moment[] }}
+ */
+export function flushExpiredPits(state, nowMs = Date.now()) {
+  const pending = { ...(state.pendingPits || {}) };
+  /** @type {import('../../types.js').Moment[]} */
+  const moments = [];
+  let changed = false;
+  for (const [key, pit] of Object.entries(pending)) {
+    if (nowMs - (pit.wallMs || 0) < PIT_COMPOUND_WAIT_MS) continue;
+    moments.push(buildPitMoment(pit, { timedOut: true, state }));
+    delete pending[key];
+    changed = true;
+  }
+  if (!changed) return { state, moments: [] };
+  return {
+    state: { ...state, pendingPits: pending },
+    moments,
+  };
+}
+
+/**
+ * @param {object} pit  pending or combined pit fields
+ * @param {{ timedOut?: boolean, compoundOn?: string|null, state?: object }} [opts]
+ */
+export function buildPitMoment(pit, opts = {}) {
+  const num = Number(pit.driver);
+  const compoundOn = opts.compoundOn ?? pit.compoundOn ?? null;
+  const posIn = pit.positionIn;
+  let severity = 5;
+  if (posIn != null && posIn <= 3) severity = 7;
+  else if (posIn != null && posIn <= 10) severity = 6;
+  if (opts.state && num === opts.state.leader) severity = 7;
+
+  const name =
+    opts.state != null
+      ? driverLabel(opts.state, num)
+      : pit.driverName || `Driver ${num}`;
+
+  return {
+    id: `pit-${num}-${pit.lap ?? pit.t}`,
+    type: "strategy.pit",
+    severity,
+    t: pit.t,
+    entities: [num],
+    data: {
+      driver: num,
+      driverName: name,
+      lap: pit.lap,
+      stop: pit.stop,
+      lane: pit.lane,
+      compoundOff: pit.compoundOff || null,
+      compoundOn: compoundOn || null,
+      positionIn: posIn != null ? Number(posIn) : null,
+      trackStatus: pit.trackStatus,
+      timedOut: Boolean(opts.timedOut),
+    },
+  };
+}
+
 export function buildPracticeRecap(state) {
   const compounds = new Set(
     (state.compoundsSeen || []).map((c) => String(c).toUpperCase()),
