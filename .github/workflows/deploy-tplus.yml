@@ -1,5 +1,8 @@
 # Deploy TPlus Cloudflare Worker on push to main when TPlus-relevant paths change.
 #
+# Bias: prefer an extra deploy over missing one that needed a redeploy.
+# Still omit pure F1 / GridWhisper paths so everyday quali work doesn't redeploy Starship.
+#
 # GitHub → Settings → Secrets and variables → Actions:
 #   CLOUDFLARE_API_TOKEN   — "Edit Cloudflare Workers" template (or Workers Scripts:Edit + Account:Read)
 #   CLOUDFLARE_ACCOUNT_ID  — hex Account ID from Cloudflare dashboard sidebar
@@ -7,6 +10,9 @@
 # Worker runtime secrets (Cloudflare dashboard / wrangler secret put — NOT GitHub):
 #   TELEGRAM_TOKEN
 #   TELEGRAM_ADMIN_IDS
+#
+# Manual: Actions → Deploy TPlus → Run workflow
+#   (use after shared-only tweaks you care about, e.g. src/engine/config.js defaults)
 
 name: Deploy TPlus
 
@@ -14,16 +20,20 @@ on:
   push:
     branches: [main]
     paths:
+      # Product surface
       - "worker/tplus/**"
       - "wrangler.toml"
+      - "src/tplus-commands.js"
+      - "src/starship-session.js"
+      # Missions (git timelines + worker bundle)
+      - "src/missions/**"
+      - "missions/**"
+      # Starship domain + Cue core used by createStarshipSession / pipeline
+      - "src/engine/domains/starship/**"
       - "src/engine/pipeline.js"
       - "src/engine/gate.js"
-      - "src/engine/config.js"
       - "src/engine/types.js"
-      - "src/engine/domains/starship/**"
-      - "src/missions/**"
-      - "src/starship-session.js"
-      - "missions/**"
+      # Tooling / deps (wrangler version, etc.) — over-deploy OK
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-tplus.yml"

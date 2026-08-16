@@ -1,17 +1,18 @@
 # Deploy GridWhisper Cloudflare Worker on push to main when worker-relevant paths change.
 #
+# Bias: prefer an extra deploy over missing one that needed a redeploy.
+# F1 moments engine runs on the laptop (MQTT → POST /deliver) — NOT listed here.
+#
 # Same GitHub secrets as TPlus (reuse if already set):
-#   CLOUDFLARE_API_TOKEN   — Workers Scripts:Edit + Account:Read
-#   CLOUDFLARE_ACCOUNT_ID  — from Cloudflare dashboard
+#   CLOUDFLARE_API_TOKEN
+#   CLOUDFLARE_ACCOUNT_ID
 #
 # Worker runtime secrets (wrangler secret put / dashboard — NOT GitHub):
 #   TELEGRAM_TOKEN
 #   DELIVER_SECRET
 #   TELEGRAM_ADMIN_IDS   (optional)
 #
-# Note: F1 moments engine runs on the laptop (MQTT → POST /deliver).
-# Changes under src/engine/ do NOT deploy this worker unless the Worker
-# itself starts importing them. Path filter matches only the CF surface.
+# Manual: Actions → Deploy GridWhisper → Run workflow
 
 name: Deploy GridWhisper
 
@@ -19,9 +20,13 @@ on:
   push:
     branches: [main]
     paths:
+      # Product surface (enroll, help, /deliver, admin note/broadcast)
       - "worker/gridwhisper/**"
       - "wrangler.gridwhisper.toml"
       - "src/gridwhisper-commands.js"
+      # Shared delivery helper used only if Worker later imports it — keep for safety if we wire it
+      # (currently Worker is self-contained; package.json covers tooling)
+      # Tooling / deps
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-gridwhisper.yml"

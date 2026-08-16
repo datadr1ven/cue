@@ -245,7 +245,7 @@ npx wrangler deploy   # manual
 ```
 
 **Autodeploy:** add GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.  
-Workflow [`.github/workflows/deploy-tplus.yml`](./.github/workflows/deploy-tplus.yml) deploys on push to `main` when TPlus-related paths change (not F1-only paths). Use **workflow_dispatch** to deploy manually from the Actions tab.
+Workflow [`.github/workflows/deploy-tplus.yml`](./.github/workflows/deploy-tplus.yml) deploys on push to `main` when TPlus paths change (worker, missions, starship domain, shared pipeline/gate, package.json — not pure F1 domain files). Prefers an extra deploy over a missed one; use **workflow_dispatch** if only something like `src/engine/config.js` changed.
 
 Local Node polling (`npm run starship:bot`) remains available for development; use one or the other, not both, against the same bot token.
 

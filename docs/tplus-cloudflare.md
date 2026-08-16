@@ -125,14 +125,17 @@ Workflow: [`.github/workflows/deploy-tplus.yml`](../.github/workflows/deploy-tpl
 
 ### Path filters (so F1-only work does not redeploy TPlus)
 
-Deploy runs only when these change (or via **Actions → Deploy TPlus → Run workflow**):
+Deploy runs when these change (or via **Actions → Deploy TPlus → Run workflow**).  
+Bias: **over-deploy rather than miss a needed redeploy**, but pure F1/GridWhisper paths stay out.
 
-- `worker/tplus/**`, `wrangler.toml`
-- Shared engine pieces used by TPlus (`pipeline`, `gate`, `config`, `types`)
-- `src/engine/domains/starship/**`, `src/missions/**`, `src/starship-session.js`
-- `missions/**`, `package.json`, `package-lock.json`, the workflow file itself
+Typical triggers:
+- `worker/tplus/**`, `wrangler.toml`, `src/tplus-commands.js`
+- Shared Cue core used by the session pipeline (`pipeline`, `gate`, `types`)
+- `src/engine/domains/starship/**`, `src/missions/**`, `src/starship-session.js`, `missions/**`
+- `package.json`, `package-lock.json`, the workflow file itself
 
-Edits under `src/engine/domains/f1/**` alone do **not** trigger this workflow.
+**Not** triggered by pure F1 work (`src/engine/domains/f1/**`, `src/mqtt-worker.js`, GridWhisper worker).  
+Also **not** by `src/engine/config.js` alone (F1 `ENGINE_SESSION_KIND` lives there) — use **workflow_dispatch** if you change engine defaults TPlus should pick up.
 
 ### One-time GitHub secrets
 
