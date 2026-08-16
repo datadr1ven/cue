@@ -188,10 +188,19 @@ async function onMessage(topic, buf) {
   } catch {
     return;
   }
+  // Local publish injects original capture receivedAt onto the payload; keep it
+  // so dateless topics (stints) don't look like "now" for event-time silence.
+  const recvFromPayload =
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    payload.receivedAt
+      ? payload.receivedAt
+      : null;
   const line = {
     topic,
     payload,
-    receivedAt: new Date().toISOString(),
+    receivedAt: recvFromPayload || new Date().toISOString(),
     source: "mqtt",
   };
   for (const ev of expandOpenF1Line(line)) {

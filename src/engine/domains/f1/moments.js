@@ -17,6 +17,7 @@ import {
   buildPracticeRecap,
   buildPitMoment,
   resolveFinishOrder,
+  isPositionMapSane,
 } from "./snapshot.js";
 
 const SESSION_BEST_COOLDOWN_MS = 20_000;
@@ -193,20 +194,30 @@ function maybeOrderPulse(state, event) {
     state.lastOrderNoiseT || state.segmentStartT || state.lastEventT;
   const silenceFromMs = toMs(silenceFrom);
   if (silenceFromMs == null) return [];
-  if (tMs - silenceFromMs < ORDER_PULSE_MS) return [];
+  const quietMs = tMs - silenceFromMs;
+  if (quietMs < ORDER_PULSE_MS) return [];
+  // Multi-hour leap usually means wall-clock mixed into event time (MQTT replay
+  // of dateless topics), not a genuinely quiet race — refuse the pulse.
+  if (quietMs > 6 * 60 * 60 * 1000) return [];
 
   const lastPulseMs = toMs(state.lastOrderPulseT);
   if (lastPulseMs != null && tMs - lastPulseMs < ORDER_PULSE_MS) return [];
 
   const top5 = topN(state, 5);
   if (top5.length < 3) return [];
+  // Partial boards right after lights-out (P2… without P1, duplicate slots)
+  // must not pulse — wait until the map is coherent.
+  if (!isPositionMapSane(state)) return [];
+
+  // Prefer a real feed clock for the moment stamp (not wall-clock fallback).
+  const stamp = state.lastEventT || t;
 
   return [
     {
-      id: `order-snapshot-${t}`,
+      id: `order-snapshot-${stamp}`,
       type: "order.snapshot",
       severity: 6,
-      t,
+      t: stamp,
       data: {
         top5,
         approx: true,

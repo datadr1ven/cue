@@ -69,9 +69,13 @@ export function normalizeOpenF1(line, opts = {}) {
     return null;
   }
 
+  // Prefer feed timestamps. payload.receivedAt is set by publish-ndjson when
+  // replaying captures over MQTT — line.receivedAt is wall-clock "now" on the
+  // worker and must not win, or silence timers (order pulse) fire immediately.
   const t =
     payload.date ||
     payload.date_start ||
+    payload.receivedAt ||
     line.receivedAt ||
     null;
 
