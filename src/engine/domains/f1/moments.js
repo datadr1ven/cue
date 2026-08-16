@@ -8,8 +8,12 @@ import { driverLabel } from "./roster.js";
 import {
   isQualifyingMode,
   isRaceStyleMode,
+  isPracticeMode,
+  isKnockoutMode,
+  knockoutSegmentLabel,
   orderedField,
   sessionContext,
+  phaseLabel,
 } from "./snapshot.js";
 
 const SESSION_BEST_COOLDOWN_MS = 20_000;
@@ -33,7 +37,8 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromLap(prev, next, p, t));
   }
 
-  if (event.type === "f1.position" && isRaceStyleMode(next)) {
+  // Practice: no order / pits / radio noise
+  if (event.type === "f1.position" && isRaceStyleMode(next) && !isPracticeMode(next)) {
     moments.push(...fromPosition(prev, next, p, t));
   }
 
@@ -41,7 +46,7 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromPit(prev, next, p, t));
   }
 
-  if (event.type === "f1.team_radio") {
+  if (event.type === "f1.team_radio" && !isPracticeMode(next)) {
     moments.push(...fromRadio(next, p, t));
   }
 
@@ -53,11 +58,12 @@ function fromRaceControl(prev, next, p, t) {
   const up = msg.toUpperCase();
   const flag = String(p.flag || "").toUpperCase();
   const out = [];
-  const quali = isQualifyingMode(next) || isQualifyingMode(prev);
+  const knockout = isKnockoutMode(next) || isKnockoutMode(prev) || isQualifyingMode(next);
 
   if (up.includes("SESSION STARTED")) {
-    if (quali || next.segment >= 2 || next.sessionKind === "qualifying") {
+    if (knockout || next.segment >= 2) {
       const seg = next.segment || 1;
+      const label = segmentLabel(seg, next.sessionKind);
       out.push({
         id: `quali-seg-start-${seg}-${t}`,
         type: "quali.segment_start",
@@ -65,28 +71,36 @@ function fromRaceControl(prev, next, p, t) {
         t,
         data: {
           segment: seg,
-          label: segmentLabel(seg),
+          label,
           message: msg,
-          ...contextFields(next, segmentLabel(seg)),
+          ...contextFields(next, label),
         },
       });
     } else {
+      // Practice / race / sprint / unknown — single session banner
+      const label = phaseLabel(next);
       out.push({
         id: `session-started-${t}`,
         type: "session.started",
-        severity: 7,
+        severity: isPracticeMode(next) ? 6 : 7,
         t,
-        data: { message: msg, ...contextFields(next) },
+        data: {
+          message: msg,
+          label,
+          practice: isPracticeMode(next),
+          ...contextFields(next, label),
+        },
       });
     }
   }
 
-  // Delayed Q-cut: previous chequered + new segment starting
+  // Delayed knockout cut: previous chequered + new segment starting
   if (
     up.includes("SESSION STARTED") &&
     prev.awaitingNextSegment &&
     prev.orderAtChequered?.length &&
-    (prev.chequeredCount || 0) >= 1
+    (prev.chequeredCount || 0) >= 1 &&
+    (isKnockoutMode(prev) || isKnockoutMode(next) || isQualifyingMode(next))
   ) {
     const ended = prev.endedSegment || prev.segment || 1;
     if (ended <= 2) {
@@ -133,14 +147,36 @@ function fromRaceControl(prev, next, p, t) {
     const order = next.orderAtChequered || orderedField(next, 30);
     const kind = next.sessionKind;
 
-    if (kind === "qualifying" || seg >= 2 || (kind === "unknown" && isShortSegment(next))) {
+    if (isPracticeMode(next)) {
+      // Ultra-low volume: session over (+ optional session-best name)
+      const best = next.sessionBest;
+      out.push({
+        id: `practice-end-${t}`,
+        type: "session.chequered",
+        severity: 6,
+        t,
+        data: {
+          message: msg,
+          practice: true,
+          label: phaseLabel(next) || "Practice",
+          sessionBestName:
+            best?.driver != null ? driverLabel(next, best.driver) : null,
+          sessionBestTime:
+            best?.timeSec != null ? formatLapTime(best.timeSec) : null,
+          ...contextFields(next, phaseLabel(next) || "Practice"),
+        },
+      });
+    } else if (
+      isKnockoutMode(next) ||
+      seg >= 2 ||
+      (kind === "unknown" && isShortSegment(next))
+    ) {
+      const label = segmentLabel(seg, kind);
       if (seg >= 3) {
         out.push(...buildPoleMoment(next, order, t));
       } else if (seg <= 2 && !next.awaitingNextSegment) {
-        // no next segment expected — emit cut immediately (rare)
         out.push(...buildCutMoment(next, order, seg, t));
       } else if (seg <= 2) {
-        // cut usually emitted on next SESSION STARTED; soft chequered note
         out.push({
           id: `quali-chequered-${seg}-${t}`,
           type: "quali.chequered",
@@ -148,12 +184,14 @@ function fromRaceControl(prev, next, p, t) {
           t,
           data: {
             segment: seg,
-            label: segmentLabel(seg),
+            label,
             top5: enrichOrder(next, order.slice(0, 5)),
+            ...contextFields(next, label),
           },
         });
       }
     } else {
+      // Race / sprint finish
       out.push({
         id: `chequered-${t}`,
         type: "session.chequered",
@@ -164,39 +202,31 @@ function fromRaceControl(prev, next, p, t) {
           top5: topN(next, 5),
           leader: next.leader,
           leaderName: next.leader != null ? driverLabel(next, next.leader) : null,
+          label: phaseLabel(next),
+          ...contextFields(next, phaseLabel(next)),
         },
       });
     }
   }
 
   if (up.includes("SESSION FINISHED") && !up.includes("CHEQUERED")) {
-    // Quali: cut/pole cover the story; skip noisy finished lines
-    if (!isQualifyingMode(next) && next.sessionKind !== "qualifying") {
+    // Knockout: cut/pole cover the story. Practice: chequered path preferred.
+    if (
+      !isQualifyingMode(next) &&
+      !isKnockoutMode(next) &&
+      !isPracticeMode(next)
+    ) {
       out.push({
         id: `session-finished-${t}`,
         type: "session.finished",
         severity: 7,
         t,
-        data: { message: msg, top5: topN(next, 5) },
+        data: {
+          message: msg,
+          top5: topN(next, 5),
+          ...contextFields(next, phaseLabel(next)),
+        },
       });
-    }
-  }
-
-  // Final Q segment with no following SESSION STARTED: emit cut/pole on finished
-  if (
-    (up.includes("SESSION FINISHED") || flag.includes("CHEQUERED") || up.includes("CHEQUERED FLAG")) &&
-    (next.sessionKind === "qualifying" || (next.segment || 0) >= 2)
-  ) {
-    // Pole if Q3 just ended (chequered path handles seg>=3)
-    // Q1/Q2 cut without a following segment: if finished and awaiting and no more data later — handled by chequered soft + optional finished cut
-    if (
-      up.includes("SESSION FINISHED") &&
-      next.awaitingNextSegment &&
-      (next.endedSegment || 0) <= 2 &&
-      next.orderAtChequered?.length
-    ) {
-      // Don't double with delayed cut on next start; only if this looks like last segment of file
-      // Skip here — delayed cut on next start is primary. For Q3-less weekend edge, ignore.
     }
   }
 
@@ -246,8 +276,9 @@ function fromRaceControl(prev, next, p, t) {
 
 function fromLap(prev, next, p, t) {
   if (!next.sessionBest?._improved) return [];
-  // Only in known/inferred qualifying (not race, not unknown race distance)
-  if (!isQualifyingMode(next) && next.sessionKind !== "qualifying") return [];
+  // Knockout formats only — not practice / race / sprint race
+  if (!isKnockoutMode(next) && !isQualifyingMode(next)) return [];
+  if (isPracticeMode(next)) return [];
 
   const best = next.sessionBest;
   if (prev.sessionBest && prev.sessionBest.timeSec === best.timeSec) return [];
@@ -264,12 +295,12 @@ function fromLap(prev, next, p, t) {
 
   const boardPos = next.position[best.driver];
   const stint = next.stints[best.driver];
-  const compound = stint?.compound && stint.compound !== "UNKNOWN"
-    ? stint.compound
-    : null;
-  // Board order often lags the timing loop — surface both
+  const compound =
+    stint?.compound && stint.compound !== "UNKNOWN" ? stint.compound : null;
   const boardTop3 = topN(next, 3);
-  const boardLeader = next.leader != null ? driverLabel(next, next.leader) : null;
+  const boardLeader =
+    next.leader != null ? driverLabel(next, next.leader) : null;
+  const label = segmentLabel(next.segment || 1, next.sessionKind);
 
   return [
     {
@@ -289,22 +320,24 @@ function fromLap(prev, next, p, t) {
           best.prevDriver != null ? driverLabel(next, best.prevDriver) : null,
         prevTimeSec: best.prevTimeSec,
         segment: next.segment || null,
-        label: segmentLabel(next.segment || 1),
+        label,
         boardPos: boardPos != null ? Number(boardPos) : null,
         boardLeaderName: boardLeader,
         boardTop3,
         compound,
-        ...contextFields(next, segmentLabel(next.segment || 1)),
+        ...contextFields(next, label),
       },
     },
   ];
 }
 
-/** Pits: race, or unknown after we look race-like. Never in quali. */
+/** Pits: GP/sprint race only — never practice or knockout quali. */
 function allowPitMoments(state) {
-  if (isQualifyingMode(state) || state.sessionKind === "qualifying") return false;
-  if (state.sessionKind === "race") return true;
-  // unknown: allow once green has run long (race) — not early Q1
+  if (isPracticeMode(state) || isKnockoutMode(state) || isQualifyingMode(state)) {
+    return false;
+  }
+  if (state.sessionKind === "race" || state.sessionKind === "sprint") return true;
+  // unknown: allow once green has run long (GP) — not early Q1
   return (state.completeLapCount || 0) > 120;
 }
 
@@ -432,12 +465,13 @@ function fromRadio(state, p, t) {
 
 function buildCutMoment(state, order, endedSegment, t) {
   const field = order || [];
+  // Sprint shootout field sizes differ slightly; advance targets stay 15 → 10 → pole
   const advanceN =
     endedSegment <= 1 ? Math.min(15, field.length) : Math.min(10, field.length);
   const through = enrichOrder(state, field.slice(0, advanceN));
   const outList = enrichOrder(state, field.slice(advanceN));
-  const label = segmentLabel(endedSegment);
-  const nextLabel = endedSegment <= 1 ? "Q2" : "Q3";
+  const label = segmentLabel(endedSegment, state.sessionKind);
+  const nextLabel = segmentLabel(endedSegment + 1, state.sessionKind);
 
   return [
     {
@@ -464,6 +498,8 @@ function buildCutMoment(state, order, endedSegment, t) {
 function buildPoleMoment(state, order, t) {
   const top = enrichOrder(state, (order || []).slice(0, 10));
   const pole = top[0] || null;
+  const finalLabel = segmentLabel(3, state.sessionKind);
+  const isSprintShootout = state.sessionKind === "sprint_qualifying";
   return [
     {
       id: `quali-pole-${t}`,
@@ -476,7 +512,8 @@ function buildPoleMoment(state, order, t) {
         poleName: pole?.name || null,
         top3: top.slice(0, 3),
         top10: top,
-        ...contextFields(state, "Q3"),
+        sprintShootout: isSprintShootout,
+        ...contextFields(state, finalLabel),
       },
     },
   ];
@@ -499,11 +536,8 @@ function enrichOrder(state, rows) {
   }));
 }
 
-function segmentLabel(seg) {
-  if (seg === 1) return "Q1";
-  if (seg === 2) return "Q2";
-  if (seg === 3) return "Q3";
-  return `Q${seg || "?"}`;
+function segmentLabel(seg, kind = "qualifying") {
+  return knockoutSegmentLabel(seg, kind);
 }
 
 function isShortSegment(state) {

@@ -5,7 +5,48 @@
 import { ROSTER_2026 } from "./roster.js";
 import { meetingMeta, parseLivetimingPath } from "./meeting-meta.js";
 
-/** @typedef {'unknown'|'race'|'qualifying'} SessionKind */
+/**
+ * @typedef {'unknown'|'practice'|'qualifying'|'sprint_qualifying'|'sprint'|'race'} SessionKind
+ *
+ * practice          — FP1/2/3: start / end / red only
+ * qualifying        — Q1–Q3
+ * sprint_qualifying — SQ1–SQ3 / shootout (same shape as quali)
+ * sprint            — sprint race (race-style moments)
+ * race              — grand prix
+ */
+
+/** Canonical kinds accepted by ENGINE_SESSION_KIND / config */
+export const SESSION_KINDS = [
+  "practice",
+  "qualifying",
+  "sprint_qualifying",
+  "sprint",
+  "race",
+];
+
+/**
+ * Normalize aliases → canonical kind, or null.
+ * @param {string|null|undefined} raw
+ * @returns {SessionKind|null}
+ */
+export function normalizeSessionKind(raw) {
+  if (raw == null || String(raw).trim() === "") return null;
+  const u = String(raw).trim().toLowerCase().replace(/-/g, "_");
+  if (SESSION_KINDS.includes(u)) return /** @type {SessionKind} */ (u);
+  if (["fp", "fp1", "fp2", "fp3", "practice1", "practice2", "practice3"].includes(u))
+    return "practice";
+  if (["quali", "q", "q1", "q2", "q3"].includes(u)) return "qualifying";
+  if (
+    ["sprint_quali", "sprint_qualifying", "shootout", "sq", "sq1", "sq2", "sq3"].includes(
+      u,
+    )
+  ) {
+    return "sprint_qualifying";
+  }
+  if (u === "sprint_race") return "sprint";
+  if (u === "gp" || u === "grand_prix") return "race";
+  return null;
+}
 
 export function createF1State() {
   return {
@@ -18,7 +59,7 @@ export function createF1State() {
     trackStatus: null, // green | yellow | red | vsc | safety_car | chequered
     /** @type {SessionKind} */
     sessionKind: "unknown",
-    /** Forced kind from pipeline config / env (race|qualifying) */
+    /** Forced kind from pipeline config / env */
     sessionKindForced: null,
     /** 0 = not started; 1=Q1/race; 2=Q2; 3=Q3 */
     segment: 0,
@@ -94,8 +135,8 @@ export function reduceF1(state, event, opts = {}) {
   };
 
   if (opts.sessionKind && !next.sessionKindForced) {
-    const forced = String(opts.sessionKind).toLowerCase();
-    if (forced === "race" || forced === "qualifying") {
+    const forced = normalizeSessionKind(opts.sessionKind);
+    if (forced) {
       next.sessionKindForced = forced;
       next.sessionKind = forced;
     }
@@ -268,14 +309,26 @@ function applySessionsMeta(state, p) {
     state.sessionType = String(p.session_type || name);
   }
   if (state.sessionKindForced) return;
-  const u = String(name || "").toUpperCase();
-  if (/QUAL/i.test(u) || /\bQ[123]\b/.test(u) || /SHOOTOUT/.test(u)) {
-    state.sessionKind = "qualifying";
-  } else if (/\bRACE\b/.test(u) && !/QUAL/.test(u)) {
-    state.sessionKind = "race";
-  } else if (/SPRINT/i.test(u) && !/QUAL|SHOOTOUT/.test(u)) {
-    state.sessionKind = "race";
+  const classified = classifySessionName(name);
+  if (classified) state.sessionKind = classified;
+}
+
+/**
+ * @param {string|null|undefined} name
+ * @returns {SessionKind|null}
+ */
+export function classifySessionName(name) {
+  if (!name) return null;
+  const u = String(name).toUpperCase();
+  // Order matters: sprint shootout before plain sprint; practice before race
+  if (/PRACTICE|\bFP[123]\b/.test(u)) return "practice";
+  if (/SPRINT\s*SHOOTOUT|SPRINT\s*QUAL|SHOOTOUT|\bSQ[123]\b/.test(u)) {
+    return "sprint_qualifying";
   }
+  if (/\bSPRINT\b/.test(u) && !/QUAL|SHOOTOUT/.test(u)) return "sprint";
+  if (/QUAL|\bQ[123]\b/.test(u)) return "qualifying";
+  if (/\bRACE\b/.test(u)) return "race";
+  return null;
 }
 
 /**
@@ -287,25 +340,83 @@ export function sessionContext(state, extra = {}) {
   const bits = [];
   if (state?.meetingName) bits.push(state.meetingName);
   else if (state?.circuitShortName) bits.push(state.circuitShortName);
-  const phase =
-    extra.label ||
-    (state?.sessionKind === "qualifying" || (state?.segment || 0) >= 1
-      ? segmentPhaseLabel(state)
-      : state?.sessionName || null);
+  const phase = extra.label || phaseLabel(state);
   if (phase) bits.push(phase);
   return bits.join(" · ");
 }
 
-function segmentPhaseLabel(state) {
-  if (state?.sessionKind === "qualifying" || (state?.segment || 0) >= 2) {
-    const seg = state.segment || 1;
-    if (seg === 1) return "Q1";
-    if (seg === 2) return "Q2";
-    if (seg === 3) return "Q3";
+/** Human phase label for banners */
+export function phaseLabel(state) {
+  if (!state) return null;
+  if (isKnockoutMode(state)) {
+    return knockoutSegmentLabel(state.segment || 1, state.sessionKind);
   }
-  if (state?.sessionName) return state.sessionName;
-  if (state?.sessionKind === "race") return "Race";
+  if (state.sessionKind === "practice") {
+    return prettyPracticeName(state.sessionName) || "Practice";
+  }
+  if (state.sessionKind === "sprint") return "Sprint";
+  if (state.sessionKind === "race") return "Race";
+  if (state.sessionName) return state.sessionName;
   return null;
+}
+
+function prettyPracticeName(name) {
+  if (!name) return null;
+  const u = String(name).toUpperCase();
+  if (/\bFP1\b|PRACTICE\s*1/.test(u)) return "FP1";
+  if (/\bFP2\b|PRACTICE\s*2/.test(u)) return "FP2";
+  if (/\bFP3\b|PRACTICE\s*3/.test(u)) return "FP3";
+  if (/PRACTICE/.test(u)) return "Practice";
+  return null;
+}
+
+/** Q1–Q3 or SQ1–SQ3 */
+export function knockoutSegmentLabel(seg, kind = "qualifying") {
+  const n = seg || 1;
+  const prefix = kind === "sprint_qualifying" ? "SQ" : "Q";
+  if (n >= 1 && n <= 3) return `${prefix}${n}`;
+  return `${prefix}${n}`;
+}
+
+/** Full / sprint quali knockout formats */
+export function isKnockoutMode(state) {
+  return (
+    state?.sessionKind === "qualifying" ||
+    state?.sessionKind === "sprint_qualifying"
+  );
+}
+
+export function isPracticeMode(state) {
+  return state?.sessionKind === "practice";
+}
+
+/**
+ * Sparse knockout detectors (not race order/pits).
+ * Unknown multi-segment (≥2) treated as knockout until proven otherwise.
+ */
+export function isQualifyingMode(state) {
+  if (isKnockoutMode(state)) return true;
+  if (
+    state?.sessionKind === "race" ||
+    state?.sessionKind === "sprint" ||
+    state?.sessionKind === "practice"
+  ) {
+    return false;
+  }
+  if ((state?.segment || 0) >= 2) return true;
+  return false;
+}
+
+/**
+ * GP / sprint race order & pits.
+ * Unknown single-segment stays race-style (soft-launch for live GPs).
+ */
+export function isRaceStyleMode(state) {
+  if (isPracticeMode(state) || isKnockoutMode(state)) return false;
+  if (state?.sessionKind === "race" || state?.sessionKind === "sprint") {
+    return true;
+  }
+  return !isQualifyingMode(state);
 }
 
 function applyLap(state, p, t) {
@@ -337,7 +448,11 @@ function applyLap(state, p, t) {
   }
 }
 
-/** Long green running without multi-segment → race (not Q1). */
+/**
+ * Long green running without multi-segment.
+ * Do NOT use ~40m (that mis-tags FP as race). Full GPs are 90m+; promote late
+ * or rely on SC / sessions feed / ENGINE_SESSION_KIND.
+ */
 function maybePromoteRaceByDuration(state, t) {
   if (state.sessionKindForced) return;
   if (state.sessionKind !== "unknown") return;
@@ -347,8 +462,7 @@ function maybePromoteRaceByDuration(state, t) {
   const nowMs = toMs(t || state.lastEventT);
   if (startMs == null || nowMs == null) return;
   const mins = (nowMs - startMs) / 60000;
-  // Q1 is ~18m, Q2 ~15m, Q3 ~12m; races run far longer before chequered
-  if (mins > 40) state.sessionKind = "race";
+  if (mins > 100) state.sessionKind = "race";
 }
 
 function applyRaceControl(state, p, t) {
@@ -356,9 +470,15 @@ function applyRaceControl(state, p, t) {
   const flag = String(p.flag || "").toUpperCase();
   const cat = String(p.category || "");
 
-  // Stewards sometimes name Q1/Q2/Q3 before we multi-segment-detect
-  if (!state.sessionKindForced && /\bQ[123]\b/.test(msg)) {
-    state.sessionKind = "qualifying";
+  // Stewards text can name the format before v1/sessions arrives
+  if (!state.sessionKindForced) {
+    if (/\bSQ[123]\b/.test(msg) || /SPRINT\s*SHOOTOUT|SPRINT\s*QUAL/.test(msg)) {
+      state.sessionKind = "sprint_qualifying";
+    } else if (/\bQ[123]\b/.test(msg) && !/\bSQ/.test(msg)) {
+      state.sessionKind = "qualifying";
+    } else if (/\bPRACTICE\b|\bFP[123]\b/.test(msg)) {
+      state.sessionKind = "practice";
+    }
   }
 
   if (msg.includes("SESSION STARTED")) {
@@ -366,11 +486,18 @@ function applyRaceControl(state, p, t) {
       state.chequered ||
       state.awaitingNextSegment ||
       (state.chequeredCount || 0) > 0;
-    if (afterChequered) {
-      // Multi-segment → qualifying (Q2/Q3 after a prior chequered)
-      if (!state.sessionKindForced) state.sessionKind = "qualifying";
-      if (state.segment < 1) state.segment = 1; // capture started mid-Q1
+    if (afterChequered && isKnockoutMode(state)) {
+      // Multi-segment knockout (Q2/Q3 or SQ2/SQ3)
+      if (state.segment < 1) state.segment = 1;
       state.segment = Math.min(3, state.segment + 1);
+    } else if (afterChequered && state.sessionKind === "unknown") {
+      // Heuristic: multi-chequered session → full quali unless stewards said SQ
+      state.sessionKind = "qualifying";
+      if (state.segment < 1) state.segment = 1;
+      state.segment = Math.min(3, state.segment + 1);
+    } else if (afterChequered && state.sessionKind === "practice") {
+      // Practice red-flag restart after a rare early chequered — don't treat as Q2
+      state.segment = Math.max(1, state.segment || 1);
     } else if (state.segment === 0) {
       state.segment = 1;
     }
@@ -379,8 +506,8 @@ function applyRaceControl(state, p, t) {
     state.awaitingNextSegment = false;
     state.segmentStartT = t || state.lastEventT;
     state.trackStatus = "green";
-    // Fresh Q segment: reset session-best so each Qx has its own pole fight
-    if (state.sessionKind === "qualifying" && state.segment > 1) {
+    // Fresh knockout segment: reset session-best
+    if (isKnockoutMode(state) && state.segment > 1) {
       state.sessionBest = null;
       state.lastSessionBestAlertT = null;
     }
@@ -400,17 +527,26 @@ function applyRaceControl(state, p, t) {
     state.orderAtChequered = orderedField(state, 30);
     state.awaitingNextSegment = true;
 
-    // Short segment → qualifying (Q1 ~18m, Q2 ~15m, Q3 ~12m)
+    // Classify unknown sessions at first chequered
     if (!state.sessionKindForced && state.sessionKind === "unknown") {
       const startMs = toMs(state.segmentStartT);
       const endMs = toMs(t);
+      const laps = state.completeLapCount || 0;
       if (startMs != null && endMs != null) {
         const mins = (endMs - startMs) / 60000;
-        if (mins > 0 && mins <= 35) state.sessionKind = "qualifying";
-        else if (mins > 45) state.sessionKind = "race";
+        // Short pure green + few flying laps → Q segment
+        // Short green after lots of laps (red-flagged FP) → practice
+        // ~1h single block → practice; much longer → race
+        if (mins > 0 && mins <= 35 && laps < 50) {
+          state.sessionKind = "qualifying";
+        } else if (mins > 0 && mins <= 100) {
+          state.sessionKind = "practice";
+        } else if (mins > 100) {
+          state.sessionKind = "race";
+        }
+      } else if (laps >= 50) {
+        state.sessionKind = "practice";
       } else if ((state.orderAtChequered || []).length >= 16) {
-        // Capture started mid-segment (no segmentStartT): full field chequered
-        // is almost always a Q cut, not a race finish without prior race signals.
         state.sessionKind = "qualifying";
       }
     }
@@ -433,6 +569,7 @@ function applyRaceControl(state, p, t) {
   ) {
     state.trackStatus = "safety_car";
     if (!state.sessionKindForced && state.sessionKind === "unknown") {
+      // Full SC is rare in practice; usually race or sprint
       state.sessionKind = "race";
     }
     return;
@@ -476,22 +613,17 @@ function ensureFallbackDrivers(state) {
   }
 }
 
+/**
+ * Parse OpenF1 / capture timestamps as UTC when timezone is omitted
+ * (otherwise Node treats "2026-03-07T01:51:50.638000" as *local* and
+ * duration heuristics mis-fire).
+ */
 function toMs(t) {
   if (t == null) return null;
-  const n = new Date(t).getTime();
+  let s = String(t).trim();
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = s + "Z";
+  }
+  const n = new Date(s).getTime();
   return Number.isFinite(n) ? n : null;
-}
-
-/** True when we should use sparse quali detectors (not race order/pits). */
-export function isQualifyingMode(state) {
-  if (state.sessionKind === "qualifying") return true;
-  if (state.sessionKind === "race") return false;
-  // Multi-segment already underway
-  if ((state.segment || 0) >= 2) return true;
-  return false;
-}
-
-/** Race-style order / pit moments. */
-export function isRaceStyleMode(state) {
-  return !isQualifyingMode(state);
 }

@@ -35,8 +35,10 @@ export function loadConfig(overrides = {}) {
     /** Max radios per driver per session window */
     radioCooldownMs: envNum("ENGINE_RADIO_COOLDOWN_MS", 120_000),
     /**
-     * Force session kind for F1: race | qualifying.
-     * Empty = auto (multi-segment / short-to-chequered / SC heuristics).
+     * Force session kind for F1:
+     *   practice | qualifying | sprint_qualifying | sprint | race
+     * Aliases: fp, quali, shootout, sq, …
+     * Empty = auto (name / multi-segment / duration heuristics).
      */
     sessionKind:
       process.env.ENGINE_SESSION_KIND ||

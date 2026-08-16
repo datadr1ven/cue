@@ -40,7 +40,25 @@ ENGINE_SESSION_KIND=qualifying npm run replay -- \
 | `cn-fp1-and-sprintqual.ndjson` | ~35 | FP1 + sprint quali |
 | `aus-fp3-qual.ndjson` | ~49 | FP3+qual mashed; more reds/segments |
 
-Race captures leave `ENGINE_SESSION_KIND` unset (or `=race`).
+### Session kinds (`ENGINE_SESSION_KIND`)
+
+| Kind | Volume | What you get |
+|------|--------|----------------|
+| `practice` (alias `fp`) | **Very low** | Start / resume, red/VSC, finished (+ optional session fastest) |
+| `qualifying` (`quali`) | Medium | Q1–Q3 starts, fastest laps, cuts (who’s **out**), pole |
+| `sprint_qualifying` (`shootout`, `sq`) | Medium | Same as quali with **SQ1–SQ3** + sprint pole |
+| `sprint` | Race-like | Leader changes, pits, SC, finish |
+| `race` | Race-like | Same as today for the GP |
+| *(unset)* | Auto | Heuristics; **force `practice` for FP** — auto is imperfect mid-session |
+
+```bash
+ENGINE_SESSION_KIND=practice npm run replay -- ~/testdata/aus-fp3.ndjson
+# ~7 alerts vs ~90 if mis-tagged as race
+
+ENGINE_SESSION_KIND=sprint_qualifying npm run replay -- ~/testdata/cn-fp1-and-sprintqual.ndjson
+```
+
+Race / full quali captures: leave unset or set explicitly (`race` / `qualifying`).
 
 ## Local MQTT → log
 

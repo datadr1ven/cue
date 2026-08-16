@@ -1,4 +1,8 @@
-import { createF1State, reduceF1 } from "./snapshot.js";
+import {
+  createF1State,
+  reduceF1,
+  normalizeSessionKind,
+} from "./snapshot.js";
 import { detectF1Moments } from "./moments.js";
 import { renderF1Moment } from "./render.js";
 
@@ -6,11 +10,7 @@ import { renderF1Moment } from "./render.js";
  * @param {import('../../types.js').EngineConfig} [config]
  */
 export function createF1Domain(config = {}) {
-  const kind =
-    config.sessionKind &&
-    ["race", "qualifying"].includes(String(config.sessionKind).toLowerCase())
-      ? String(config.sessionKind).toLowerCase()
-      : null;
+  const kind = normalizeSessionKind(config.sessionKind);
 
   return {
     createState: () => {
@@ -29,4 +29,11 @@ export function createF1Domain(config = {}) {
 }
 
 export { ROSTER_2026, driverLabel } from "./roster.js";
-export { isQualifyingMode, isRaceStyleMode } from "./snapshot.js";
+export {
+  isQualifyingMode,
+  isRaceStyleMode,
+  isPracticeMode,
+  isKnockoutMode,
+  normalizeSessionKind,
+  SESSION_KINDS,
+} from "./snapshot.js";

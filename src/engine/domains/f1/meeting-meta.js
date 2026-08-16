@@ -33,7 +33,7 @@ export function parseLivetimingPath(url) {
     /(\d{4}-\d{2}-\d{2})_([A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)_Grand_Prix/i,
   );
   const sessionM = s.match(
-    /\/(\d{4}-\d{2}-\d{2})_(Practice_[123]|Qualifying|Sprint[A-Za-z_]*|Race)\//i,
+    /\/(\d{4}-\d{2}-\d{2})_(Practice_[123]|Qualifying|Sprint_Shootout|Sprint_Qualifying|Sprint|Race)\//i,
   );
   let meetingName = null;
   if (meetingM) {

@@ -15,13 +15,13 @@ export function renderF1Moment(moment, state) {
   const head = ctxPrefix(d, state);
 
   switch (moment.type) {
-    case "session.started":
+    case "session.started": {
+      const what = d.label || (d.practice ? "Practice" : "Session");
       return withHead(
         head,
-        withDisclaimer(
-          `🚦 Session started${d.message?.includes("Q") ? ` (${d.message})` : ""}`,
-        ),
+        withDisclaimer(`🚦 ${what} started`),
       );
+    }
 
     case "quali.segment_start":
       return withHead(
@@ -92,20 +92,34 @@ export function renderF1Moment(moment, state) {
         d.top3?.length > 0
           ? d.top3.map((x) => `P${x.pos} ${x.name}`).join(" · ")
           : d.poleName || "";
-      return withHead(
-        head,
-        `🥇 Pole: ${d.poleName || "—"}${top ? `\n${top}` : ""}`,
-      );
+      const title = d.sprintShootout
+        ? `🥇 Sprint pole: ${d.poleName || "—"}`
+        : `🥇 Pole: ${d.poleName || "—"}`;
+      return withHead(head, `${title}${top ? `\n${top}` : ""}`);
     }
 
     case "session.finished":
       return withHead(head, finishLine("Session finished", d.top5));
 
-    case "session.chequered":
+    case "session.chequered": {
+      if (d.practice) {
+        const best =
+          d.sessionBestName && d.sessionBestTime
+            ? `\nFastest: ${d.sessionBestName} ${d.sessionBestTime}`
+            : "";
+        return withHead(
+          head,
+          `🏁 ${d.label || "Practice"} finished${best}`,
+        );
+      }
       return withHead(
         head,
-        finishLine("🏁 Chequered flag", d.top5 || formatLeader(d)),
+        finishLine(
+          d.label ? `🏁 ${d.label} · chequered` : "🏁 Chequered flag",
+          d.top5 || formatLeader(d),
+        ),
       );
+    }
 
     case "flag.vsc":
       return withHead(head, `⚠️ VSC deployed${leaderClause(d)}`);
