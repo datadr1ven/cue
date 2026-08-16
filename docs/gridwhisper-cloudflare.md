@@ -174,6 +174,19 @@ ALERT_TAG=off MQTT_SOURCE=local …
 
 Live (`MQTT_SOURCE=live`) has **no** tag unless you set `ALERT_TAG`.
 
+### Online / offline banners
+
+When the laptop worker starts (MQTT subscribed) and when it stops (Ctrl+C / SIGTERM), subscribers get a one-shot banner:
+
+```text
+🟢 GridWhisper live feed is online
+…
+🔴 GridWhisper live feed is offline
+…
+```
+
+Disable with `LIFECYCLE_BANNERS=off`. Reconnects mid-session do **not** re-send the online banner.
+
 Or:
 
 ```bash

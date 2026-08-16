@@ -72,6 +72,10 @@ export function createF1State() {
     stints: {},
     /** driver_number → last pit */
     lastPit: {},
+    /** driver_number → pit-in count this session (practice recap) */
+    pitCounts: {},
+    /** Distinct tyre compounds seen this session */
+    compoundsSeen: [],
     leader: null,
     weather: null,
     lastEventT: null,
@@ -131,6 +135,10 @@ export function reduceF1(state, event, opts = {}) {
     position: { ...state.position },
     stints: { ...state.stints },
     lastPit: { ...state.lastPit },
+    pitCounts: { ...state.pitCounts },
+    compoundsSeen: Array.isArray(state.compoundsSeen)
+      ? [...state.compoundsSeen]
+      : [],
     sessionBest: state.sessionBest ? { ...state.sessionBest } : null,
   };
 
@@ -162,6 +170,8 @@ export function reduceF1(state, event, opts = {}) {
     next.position = {};
     next.stints = {};
     next.lastPit = {};
+    next.pitCounts = {};
+    next.compoundsSeen = [];
     next.leader = null;
     next.trackStatus = null;
     next.sessionActive = false;
@@ -223,6 +233,11 @@ export function reduceF1(state, event, opts = {}) {
       if (num == null || pos == null) break;
       next.position[num] = Number(pos);
       next.leader = computeLeader(next.position);
+      // After chequered, cars already on a flying lap can still improve —
+      // keep the freeze list fresh until the next segment starts (cut time).
+      if (next.awaitingNextSegment) {
+        next.orderAtChequered = orderedField(next, 30);
+      }
       break;
     }
     case "f1.pit": {
@@ -234,6 +249,7 @@ export function reduceF1(state, event, opts = {}) {
         lane_duration: p.lane_duration ?? p.pit_duration,
         t: event.t,
       };
+      next.pitCounts[num] = (next.pitCounts[num] || 0) + 1;
       break;
     }
     case "f1.stints": {
@@ -249,6 +265,7 @@ export function reduceF1(state, event, opts = {}) {
           prev.compound !== p.compound ||
           prev.lap_start !== p.lap_start,
       };
+      noteCompound(next, p.compound);
       break;
     }
     case "f1.laps": {
@@ -388,6 +405,54 @@ export function isKnockoutMode(state) {
 
 export function isPracticeMode(state) {
   return state?.sessionKind === "practice";
+}
+
+function noteCompound(state, compound) {
+  const c = String(compound || "").toUpperCase();
+  if (!c || c === "UNKNOWN") return;
+  if (!state.compoundsSeen.includes(c)) {
+    state.compoundsSeen = [...state.compoundsSeen, c];
+  }
+}
+
+/**
+ * End-of-practice scraps for a single recap message.
+ * @param {object} state
+ * @returns {{
+ *   compounds: string[],
+ *   mostStopsCount: number,
+ *   mostStopsDrivers: number[],
+ * }}
+ */
+export function buildPracticeRecap(state) {
+  const compounds = new Set(
+    (state.compoundsSeen || []).map((c) => String(c).toUpperCase()),
+  );
+  for (const st of Object.values(state.stints || {})) {
+    if (st?.compound && st.compound !== "UNKNOWN") {
+      compounds.add(String(st.compound).toUpperCase());
+    }
+  }
+  const compoundList = [...compounds].sort();
+
+  const counts = state.pitCounts || {};
+  let max = 0;
+  for (const c of Object.values(counts)) {
+    if (c > max) max = c;
+  }
+  const mostStopsDrivers =
+    max > 0
+      ? Object.entries(counts)
+          .filter(([, c]) => c === max)
+          .map(([num]) => Number(num))
+          .sort((a, b) => a - b)
+      : [];
+
+  return {
+    compounds: compoundList,
+    mostStopsCount: max,
+    mostStopsDrivers,
+  };
 }
 
 /**

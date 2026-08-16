@@ -38,6 +38,10 @@ let bot = null;
 let usersCache = new Map();
 let pipeline = null;
 let messageQueue = Promise.resolve();
+/** Process-level online/offline banners (not on every MQTT reconnect) */
+let startupBannerSent = false;
+let shuttingDown = false;
+let signalsHooked = false;
 
 const maxReconnectAttemptsBeforeSlow = 10;
 const baseReconnectDelay = 1000;
@@ -117,6 +121,62 @@ async function fanOut(alert) {
   for (const user of users) {
     await deliver(bot, runtime, user.user_id, text);
   }
+}
+
+function lifecycleBannersEnabled() {
+  const raw = process.env.LIFECYCLE_BANNERS;
+  if (raw != null && String(raw).trim() !== "") {
+    const v = String(raw).trim().toLowerCase();
+    if (["0", "false", "off", "no", "none"].includes(v)) return false;
+    if (["1", "true", "yes", "on"].includes(v)) return true;
+  }
+  // Default: announce when we actually fan out to people (or log for dry-run)
+  return runtime && runtime.deliveryMode !== "none";
+}
+
+function lifecycleBannerText(kind) {
+  const src =
+    runtime?.mqttSource === "live" ? "OpenF1 live" : "local capture / broker";
+  const mode = process.env.ENGINE_SESSION_KIND
+    ? String(process.env.ENGINE_SESSION_KIND).trim()
+    : "auto";
+  if (kind === "up") {
+    return (
+      `🟢 GridWhisper live feed is online\n` +
+      `Source: ${src} · session mode: ${mode}\n` +
+      `Sparse alerts will appear here while this watcher is running.`
+    );
+  }
+  return (
+    `🔴 GridWhisper live feed is offline\n` +
+    `Session watcher stopped — no more live moments until it comes back.`
+  );
+}
+
+async function announceLifecycle(kind) {
+  if (!lifecycleBannersEnabled()) return;
+  const text = lifecycleBannerText(kind);
+  console.log(`[lifecycle] ${text.replace(/\n/g, " | ")}`);
+  try {
+    await fanOut({ text });
+  } catch (e) {
+    console.error(`[lifecycle] ${kind} banner failed:`, e.message || e);
+  }
+}
+
+function hookLifecycleSignals() {
+  if (signalsHooked) return;
+  signalsHooked = true;
+  const go = (sig) => {
+    stopMqttWorker(sig)
+      .then(() => process.exit(0))
+      .catch((e) => {
+        console.error("Shutdown error:", e.message || e);
+        process.exit(1);
+      });
+  };
+  process.once("SIGINT", () => go("SIGINT"));
+  process.once("SIGTERM", () => go("SIGTERM"));
 }
 
 async function onMessage(topic, buf) {
@@ -206,6 +266,13 @@ export async function startMqttWorker() {
     client.subscribe(MQTT_TOPICS, { qos: 1 }, (err) => {
       if (err) console.error("Subscribe error:", err);
       else console.log("✅ Subscribed:", MQTT_TOPICS.join(", "));
+      // One online banner per process (not on every MQTT reconnect)
+      if (!startupBannerSent && !shuttingDown) {
+        startupBannerSent = true;
+        messageQueue = messageQueue
+          .then(() => announceLifecycle("up"))
+          .catch((e) => console.error("Startup banner error:", e));
+      }
     });
   });
 
@@ -223,6 +290,39 @@ export async function startMqttWorker() {
       scheduleReconnect();
     }
   });
+
+  hookLifecycleSignals();
+}
+
+/**
+ * Graceful stop: offline banner, then disconnect MQTT.
+ * Safe to call multiple times.
+ * @param {string} [reason]
+ */
+export async function stopMqttWorker(reason = "shutdown") {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  intentionalDisconnect = true;
+  clearReconnectTimer();
+  console.log(`🛑 Stopping MQTT worker (${reason})…`);
+
+  // Drain in-flight message handling, then announce offline
+  try {
+    await messageQueue;
+  } catch {
+    /* ignore */
+  }
+  await announceLifecycle("down");
+
+  if (client) {
+    try {
+      client.end(true);
+    } catch {
+      /* ignore */
+    }
+    client = null;
+  }
+  isConnected = false;
 }
 
 export function refreshSubscribers() {

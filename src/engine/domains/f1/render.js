@@ -30,7 +30,7 @@ export function renderF1Moment(moment, state) {
       );
 
     case "quali.session_best": {
-      // Time loop is source of truth; timing board / position can lag
+      // Time loop is source of truth — no position-board jargon
       const prev =
         d.prevDriverName && d.prevTimeSec != null
           ? ` (was ${d.prevDriverName} ${formatLapTime(d.prevTimeSec)})`
@@ -39,30 +39,18 @@ export function renderF1Moment(moment, state) {
         d.compound && String(d.compound).toUpperCase() !== "SOFT"
           ? ` · ${d.compound}`
           : "";
-      // Position feed often trails the timing loop (especially early / out-laps).
-      // Only annotate when the driver is "on the board" in a useful way.
-      let board = "";
-      if (d.boardPos != null && d.boardPos >= 1 && d.boardPos <= 10) {
-        board = ` · board P${d.boardPos}`;
-        if (
-          d.boardPos !== 1 &&
-          d.boardLeaderName &&
-          d.boardLeaderName !== d.driverName
-        ) {
-          // Short cross-check only — full disclaimer is on session start
-          board += ` (board P1: ${d.boardLeaderName})`;
-        }
-      }
+      const late = d.afterChequered ? " · after chequered" : "";
       return withHead(
         head,
-        `⏱️ Fastest lap: ${d.driverName} ${d.timeLabel || formatLapTime(d.timeSec)}${prev}${tyre}${board}`,
+        `⏱️ Fastest lap: ${d.driverName} ${d.timeLabel || formatLapTime(d.timeSec)}${prev}${tyre}${late}`,
       );
     }
 
     case "quali.chequered":
       return withHead(
         head,
-        finishLine(`🏁 ${d.label || "Qualifying"} chequered`, d.top5),
+        finishLine(`🏁 ${d.label || "Qualifying"} chequered`, d.top5) +
+          "\n(cars already on a lap can still improve)",
       );
 
     case "quali.cut": {
@@ -103,14 +91,26 @@ export function renderF1Moment(moment, state) {
 
     case "session.chequered": {
       if (d.practice) {
-        const best =
-          d.sessionBestName && d.sessionBestTime
-            ? `\nFastest: ${d.sessionBestName} ${d.sessionBestTime}`
-            : "";
-        return withHead(
-          head,
-          `🏁 ${d.label || "Practice"} finished${best}`,
-        );
+        const lines = [`🏁 ${d.label || "Practice"} finished`];
+        if (d.sessionBestName && d.sessionBestTime) {
+          lines.push(`Fastest: ${d.sessionBestName} ${d.sessionBestTime}`);
+        }
+        if (Array.isArray(d.compounds) && d.compounds.length > 0) {
+          lines.push(`Compounds: ${d.compounds.join(", ")}`);
+        }
+        if (
+          d.mostStopsCount > 0 &&
+          Array.isArray(d.mostStopsNames) &&
+          d.mostStopsNames.length > 0
+        ) {
+          const who = d.mostStopsNames.slice(0, 3).join(", ");
+          const more =
+            d.mostStopsNames.length > 3
+              ? ` +${d.mostStopsNames.length - 3}`
+              : "";
+          lines.push(`Most stops: ${who}${more} (${d.mostStopsCount})`);
+        }
+        return withHead(head, lines.join("\n"));
       }
       return withHead(
         head,

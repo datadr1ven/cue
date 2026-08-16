@@ -36,4 +36,5 @@ export {
   isKnockoutMode,
   normalizeSessionKind,
   SESSION_KINDS,
+  buildPracticeRecap,
 } from "./snapshot.js";

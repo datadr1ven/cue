@@ -6,6 +6,9 @@
  *   npm run worker:live:log
  *   # GridWhisper race day (CF fan-out):
  *   DELIVER_URL=… DELIVER_SECRET=… npm run worker:live:http
+ *
+ * Sends one Telegram banner when the watcher comes online and one when it
+ * shuts down (SIGINT/SIGTERM). Disable with LIFECYCLE_BANNERS=off.
  */
 
 import { startMqttWorker } from "../src/mqtt-worker.js";

@@ -14,6 +14,7 @@ import {
   orderedField,
   sessionContext,
   phaseLabel,
+  buildPracticeRecap,
 } from "./snapshot.js";
 
 const SESSION_BEST_COOLDOWN_MS = 20_000;
@@ -148,8 +149,12 @@ function fromRaceControl(prev, next, p, t) {
     const kind = next.sessionKind;
 
     if (isPracticeMode(next)) {
-      // Ultra-low volume: session over (+ optional session-best name)
+      // Ultra-low volume: end recap (fastest · compounds · pit tourist)
       const best = next.sessionBest;
+      const recap = buildPracticeRecap(next);
+      const mostStopsNames = recap.mostStopsDrivers.map((num) =>
+        driverLabel(next, num),
+      );
       out.push({
         id: `practice-end-${t}`,
         type: "session.chequered",
@@ -163,6 +168,9 @@ function fromRaceControl(prev, next, p, t) {
             best?.driver != null ? driverLabel(next, best.driver) : null,
           sessionBestTime:
             best?.timeSec != null ? formatLapTime(best.timeSec) : null,
+          compounds: recap.compounds,
+          mostStopsCount: recap.mostStopsCount,
+          mostStopsNames,
           ...contextFields(next, phaseLabel(next) || "Practice"),
         },
       });
@@ -293,14 +301,11 @@ function fromLap(prev, next, p, t) {
     return [];
   }
 
-  const boardPos = next.position[best.driver];
   const stint = next.stints[best.driver];
   const compound =
     stint?.compound && stint.compound !== "UNKNOWN" ? stint.compound : null;
-  const boardTop3 = topN(next, 3);
-  const boardLeader =
-    next.leader != null ? driverLabel(next, next.leader) : null;
   const label = segmentLabel(next.segment || 1, next.sessionKind);
+  const afterChequered = Boolean(next.chequered || next.awaitingNextSegment);
 
   return [
     {
@@ -321,10 +326,8 @@ function fromLap(prev, next, p, t) {
         prevTimeSec: best.prevTimeSec,
         segment: next.segment || null,
         label,
-        boardPos: boardPos != null ? Number(boardPos) : null,
-        boardLeaderName: boardLeader,
-        boardTop3,
         compound,
+        afterChequered,
         ...contextFields(next, label),
       },
     },
@@ -463,11 +466,27 @@ function fromRadio(state, p, t) {
   ];
 }
 
+/**
+ * How many advance from a knockout segment.
+ * 20-car grid: Q1→15, Q2→10.  22-car (2026): Q1→16, Q2→10.
+ * Rule of thumb: Q3 always 10; Q1/Q2 split the rest of the eliminations.
+ */
+export function knockoutAdvanceCount(endedSegment, fieldSize) {
+  const n = Number(fieldSize) || 0;
+  if (n <= 0) return 0;
+  if (endedSegment >= 2) return Math.min(10, n);
+  const mustDropBeforeQ3 = Math.max(0, n - 10);
+  const dropThisSegment = Math.ceil(mustDropBeforeQ3 / 2);
+  return Math.max(0, n - dropThisSegment);
+}
+
 function buildCutMoment(state, order, endedSegment, t) {
-  const field = order || [];
-  // Sprint shootout field sizes differ slightly; advance targets stay 15 → 10 → pole
-  const advanceN =
-    endedSegment <= 1 ? Math.min(15, field.length) : Math.min(10, field.length);
+  // Prefer live freeze (includes post-chequered improvements) over stale snapshot
+  const field =
+    (state.orderAtChequered && state.orderAtChequered.length
+      ? state.orderAtChequered
+      : order) || [];
+  const advanceN = knockoutAdvanceCount(endedSegment, field.length);
   const through = enrichOrder(state, field.slice(0, advanceN));
   const outList = enrichOrder(state, field.slice(advanceN));
   const label = segmentLabel(endedSegment, state.sessionKind);

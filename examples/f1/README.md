@@ -44,7 +44,7 @@ ENGINE_SESSION_KIND=qualifying npm run replay -- \
 
 | Kind | Volume | What you get |
 |------|--------|----------------|
-| `practice` (alias `fp`) | **Very low** | Start / resume, red/VSC, finished (+ optional session fastest) |
+| `practice` (alias `fp`) | **Very low** | Start / resume, red/VSC, finished recap (fastest · compounds · most stops) |
 | `qualifying` (`quali`) | Medium | Q1–Q3 starts, fastest laps, cuts (who’s **out**), pole |
 | `sprint_qualifying` (`shootout`, `sq`) | Medium | Same as quali with **SQ1–SQ3** + sprint pole |
 | `sprint` | Race-like | Leader changes, pits, SC, finish |
