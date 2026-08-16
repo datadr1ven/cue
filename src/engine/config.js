@@ -33,16 +33,6 @@ export function loadConfig(overrides = {}) {
     /** Wall-clock ms between identical moment types (dedupe) */
     dedupeMs: envNum("ENGINE_DEDUPE_MS", 30_000),
     /**
-     * Min gap between radio.clip alerts for the same driver.
-     * Soft-launch default 5 min — radios are optional noise.
-     */
-    radioCooldownMs: envNum("ENGINE_RADIO_COOLDOWN_MS", 300_000),
-    /**
-     * Allow radio.clip at severity 5 even when minSeverity is 6.
-     * Default off; enable via ENGINE_INCLUDE_RADIOS=1 or replay --radios.
-     */
-    includeRadios: envBool("ENGINE_INCLUDE_RADIOS", false),
-    /**
      * Force session kind for F1:
      *   practice | qualifying | sprint_qualifying | sprint | race
      * Aliases: fp, quali, shootout, sq, …

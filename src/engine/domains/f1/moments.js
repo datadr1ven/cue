@@ -36,6 +36,24 @@ const ORDER_NOISE_TYPES = new Set([
   "session.finished",
 ]);
 
+/** Moments that make a following radio more interesting */
+const RADIO_INTEREST_TYPES = new Set([
+  "order.leader_change",
+  "strategy.pit",
+  "flag.vsc",
+  "flag.safety_car",
+  "flag.red",
+]);
+
+/** Hard cap radios per session (or per Q segment). */
+export const RADIO_MAX_PER_SESSION = 5;
+/** Min gap between any two radio alerts (event time). */
+export const RADIO_GLOBAL_GAP_MS = 8 * 60 * 1000;
+/** Prefer radios within this long after a key moment. */
+export const RADIO_INTEREST_MS = 4 * 60 * 1000;
+/** If still zero radios after this long, allow one ambient top-3 clip. */
+export const RADIO_AMBIENT_AFTER_MS = 18 * 60 * 1000;
+
 /**
  * @param {object} prev
  * @param {object} next
@@ -83,7 +101,7 @@ export function detectF1Moments(prev, next, event) {
     );
   }
 
-  if (event.type === "f1.team_radio" && !isPracticeMode(next)) {
+  if (event.type === "f1.team_radio") {
     moments.push(...fromRadio(next, p, t));
   }
 
@@ -119,9 +137,13 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
   const t = event?.t || state.lastEventT;
   let noise = false;
   let pulsed = false;
+  let radioInterest = false;
+  let radioEmitted = false;
   for (const m of moments) {
     if (ORDER_NOISE_TYPES.has(m.type)) noise = true;
     if (m.type === "order.snapshot") pulsed = true;
+    if (RADIO_INTEREST_TYPES.has(m.type)) radioInterest = true;
+    if (m.type === "radio.clip") radioEmitted = true;
   }
   if (noise || pulsed) {
     next = {
@@ -134,6 +156,19 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
       ...next,
       lastOrderPulseT: t || next.lastOrderPulseT,
       lastOrderNoiseT: t || next.lastOrderNoiseT,
+    };
+  }
+  if (radioInterest) {
+    next = {
+      ...next,
+      lastRadioInterestT: t || next.lastRadioInterestT,
+    };
+  }
+  if (radioEmitted) {
+    next = {
+      ...next,
+      radioEmitCount: (next.radioEmitCount || 0) + 1,
+      lastRadioEmitT: t || next.lastRadioEmitT,
     };
   }
   return next;
@@ -527,22 +562,59 @@ function fromPosition(prev, next, p, t) {
   return out;
 }
 
+/**
+ * Sparse radios (1–5/session): top-3 only, global gap, prefer near key moments.
+ * No env opt-in — always eligible at severity 6 when rules pass.
+ */
 function fromRadio(state, p, t) {
+  const count = state.radioEmitCount || 0;
+  if (count >= RADIO_MAX_PER_SESSION) return [];
+
   const num = Number(p.driver_number);
+  if (!Number.isFinite(num)) return [];
   const pos = state.position[num] != null ? Number(state.position[num]) : null;
   const isLeader = state.leader != null && Number(state.leader) === num;
-  // Soft-launch: leaders / top 10 only (unknown position dropped)
-  if (!isLeader && (pos == null || pos > 10)) return [];
+  // Front of the field only (more often interesting)
+  if (!isLeader && (pos == null || pos > 3)) return [];
+
+  const tMs = toMs(t);
+  if (tMs == null) return [];
+
+  const lastEmitMs = toMs(state.lastRadioEmitT);
+  if (lastEmitMs != null && tMs - lastEmitMs < RADIO_GLOBAL_GAP_MS) return [];
+
+  const interestMs = toMs(state.lastRadioInterestT);
+  const inInterestWindow =
+    interestMs != null &&
+    tMs - interestMs >= 0 &&
+    tMs - interestMs <= RADIO_INTEREST_MS;
+  const underNeutral = ["vsc", "safety_car", "red"].includes(
+    state.trackStatus || "",
+  );
+
+  const startMs = toMs(state.segmentStartT);
+  const ambientOk =
+    count === 0 &&
+    startMs != null &&
+    tMs - startMs >= RADIO_AMBIENT_AFTER_MS &&
+    (isLeader || (pos != null && pos <= 3));
+
+  // Practice: only around red/VSC (no ambient chat)
+  if (isPracticeMode(state) && !underNeutral && !inInterestWindow) {
+    return [];
+  }
+
+  if (!inInterestWindow && !underNeutral && !ambientOk) return [];
 
   const stint = state.stints[num];
   const compound =
     stint?.compound && stint.compound !== "UNKNOWN" ? stint.compound : null;
-  // Severity 5 → off at default ENGINE_MIN_SEVERITY=6; enable with --radios / min 5
+
   return [
     {
       id: `radio-${num}-${p.recording_url || t}`,
       type: "radio.clip",
-      severity: 5,
+      severity: 6,
       t,
       entities: [num],
       data: {
@@ -554,7 +626,8 @@ function fromRadio(state, p, t) {
         leaderName:
           state.leader != null ? driverLabel(state, state.leader) : null,
         compound,
-        label: segmentLabel(state.segment || 1),
+        label: segmentLabel(state.segment || 1, state.sessionKind),
+        interest: inInterestWindow || underNeutral,
         ...contextFields(state),
       },
     },

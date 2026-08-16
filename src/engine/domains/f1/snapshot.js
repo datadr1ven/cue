@@ -113,6 +113,15 @@ export function createF1State() {
     lastOrderNoiseT: null,
     /** Event-time of last order.snapshot pulse */
     lastOrderPulseT: null,
+    /** Radios emitted this session (hard cap) */
+    radioEmitCount: 0,
+    /** Event-time of last radio.clip we emitted */
+    lastRadioEmitT: null,
+    /**
+     * Event-time of last "interesting" race moment for radio context
+     * (lead change, SC/VSC/red, notable pit).
+     */
+    lastRadioInterestT: null,
     completeLapCount: 0,
     /** driver → max lap_number seen (any lap message) */
     maxLapByDriver: {},
@@ -230,6 +239,9 @@ export function reduceF1(state, event, opts = {}) {
     next.lastSessionBestAlertT = null;
     next.lastOrderNoiseT = null;
     next.lastOrderPulseT = null;
+    next.radioEmitCount = 0;
+    next.lastRadioEmitT = null;
+    next.lastRadioInterestT = null;
     next.completeLapCount = 0;
     next.maxLapByDriver = {};
     next.lapFinishAt = {};
@@ -915,10 +927,18 @@ function applyRaceControl(state, p, t) {
     // Heartbeat silence clock starts at lights-out / restart
     state.lastOrderNoiseT = t || state.lastEventT;
     state.lastOrderPulseT = null;
-    // Fresh knockout segment: reset session-best
+    // Fresh knockout segment (Q2/Q3): new radio budget
     if (isKnockoutMode(state) && state.segment > 1) {
       state.sessionBest = null;
       state.lastSessionBestAlertT = null;
+      state.radioEmitCount = 0;
+      state.lastRadioEmitT = null;
+      state.lastRadioInterestT = null;
+    } else if ((state.segment || 1) <= 1 && (state.chequeredCount || 0) === 0) {
+      // First start of a race/practice session
+      state.radioEmitCount = 0;
+      state.lastRadioEmitT = null;
+      state.lastRadioInterestT = t || state.lastEventT;
     }
     return;
   }
@@ -980,6 +1000,7 @@ function applyRaceControl(state, p, t) {
 
   if (msg.includes("VSC DEPLOYED")) {
     state.trackStatus = "vsc";
+    state.lastRadioInterestT = t || state.lastEventT;
     return;
   }
   if (msg.includes("VSC ENDING") || msg.includes("VSC IN THIS LAP")) {
@@ -994,6 +1015,7 @@ function applyRaceControl(state, p, t) {
     !msg.includes("VSC")
   ) {
     state.trackStatus = "safety_car";
+    state.lastRadioInterestT = t || state.lastEventT;
     if (!state.sessionKindForced && state.sessionKind === "unknown") {
       // Full SC is rare in practice; usually race or sprint
       state.sessionKind = "race";
@@ -1011,6 +1033,7 @@ function applyRaceControl(state, p, t) {
     !msg.includes("CHEQUERED")
   ) {
     state.trackStatus = "red";
+    state.lastRadioInterestT = t || state.lastEventT;
     return;
   }
   if (flag === "GREEN" || msg === "TRACK CLEAR") {

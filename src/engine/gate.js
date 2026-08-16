@@ -9,8 +9,6 @@
 export function createGate(config) {
   /** @type {Map<string, number>} */
   const lastEmitted = new Map();
-  /** @type {Map<number, number>} */
-  const lastRadioByDriver = new Map();
 
   /**
    * @param {import('./types.js').Moment[]} moments
@@ -20,11 +18,7 @@ export function createGate(config) {
   function filter(moments, prefs = null) {
     const out = [];
     for (const m of moments) {
-      const radioBypass =
-        m.type === "radio.clip" &&
-        config.includeRadios &&
-        m.severity >= 5;
-      if (m.severity < config.minSeverity && !radioBypass) continue;
+      if (m.severity < config.minSeverity) continue;
 
       if (config.usePrefs && prefs) {
         // Future: filter by follows / interests
@@ -35,15 +29,6 @@ export function createGate(config) {
       const dedupeKey = `${m.type}:${m.id}`;
       const prev = lastEmitted.get(dedupeKey);
       if (prev != null && tMs - prev < config.dedupeMs) continue;
-
-      if (m.type === "radio.clip") {
-        const d = m.entities?.[0];
-        if (d != null) {
-          const lr = lastRadioByDriver.get(d);
-          if (lr != null && tMs - lr < config.radioCooldownMs) continue;
-          lastRadioByDriver.set(d, tMs);
-        }
-      }
 
       lastEmitted.set(dedupeKey, tMs);
       out.push(m);
@@ -56,6 +41,10 @@ export function createGate(config) {
 
 function toMs(t) {
   if (t == null) return null;
-  const n = new Date(t).getTime();
+  let s = String(t).trim();
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = s + "Z";
+  }
+  const n = new Date(s).getTime();
   return Number.isFinite(n) ? n : null;
 }

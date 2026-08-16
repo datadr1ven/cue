@@ -4,7 +4,6 @@
  *
  *   npm run replay -- path/to/session.ndjson
  *   npm run replay -- path/to/session.ndjson --min-severity 7
- *   npm run replay -- path/to/session.ndjson --radios
  *   npm run replay -- path/to/session.ndjson --json
  */
 
@@ -13,14 +12,11 @@ import { createPipeline } from "../src/engine/pipeline.js";
 import { readNdjsonEvents } from "../src/engine/ingest/ndjson.js";
 
 function parseArgs(argv) {
-  const args = { file: null, minSeverity: 6, json: false, radios: false };
+  const args = { file: null, minSeverity: 6, json: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") args.json = true;
-    else if (a === "--radios") {
-      // Include severity-5 team radio without lowering the global floor
-      args.radios = true;
-    } else if (a === "--min-severity") args.minSeverity = Number(argv[++i]);
+    else if (a === "--min-severity") args.minSeverity = Number(argv[++i]);
     else if (a.startsWith("--min-severity="))
       args.minSeverity = Number(a.split("=")[1]);
     else if (!a.startsWith("-")) args.file = a;
@@ -32,7 +28,7 @@ async function main() {
   const args = parseArgs(process.argv);
   if (!args.file) {
     console.error(
-      "Usage: npm run replay -- <capture.ndjson> [--min-severity N] [--radios] [--json]",
+      "Usage: npm run replay -- <capture.ndjson> [--min-severity N] [--json]",
     );
     process.exit(2);
   }
@@ -44,7 +40,6 @@ async function main() {
     useLlm: false,
     usePrefs: false,
     minSeverity: args.minSeverity,
-    includeRadios: args.radios,
   });
 
   let events = 0;

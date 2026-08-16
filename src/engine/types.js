@@ -8,7 +8,7 @@
  * @property {boolean} usePrefs
  * @property {number} minSeverity
  * @property {number} dedupeMs
- * @property {number} radioCooldownMs
+ * @property {string|null} [sessionKind]
  *
  * @typedef {object} IngestEvent
  * @property {string} type      - normalized e.g. 'f1.race_control', 'f1.position'
