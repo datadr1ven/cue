@@ -1,6 +1,7 @@
 /**
- * Operator actions for Starship HITL.
+ * Operator actions for launch HITL (Starship + Falcon 9 / Starlink).
  * Keys: single char for CLI; id used for Telegram callbacks.
+ * Mission scripts supply nominal T+ and can override display labels.
  */
 
 /** @typedef {{ id: string, key: string, label: string, phase: string, severity: number, scriptTPlusSec?: number|null, group: string }} StarshipAction */
@@ -12,20 +13,28 @@ export const STARSHIP_ACTIONS = [
   { id: "go", key: "g", label: "Go for launch", phase: "terminal", severity: 7, scriptTPlusSec: null, group: "window" },
   { id: "liftoff", key: "0", label: "Liftoff (T+0)", phase: "ascent", severity: 9, scriptTPlusSec: 0, group: "ascent" },
 
-  // Ascent (nominal T+ from SpaceX Flight 13 script — approximate)
+  // Ascent — Starship defaults; Falcon scripts override labels/T+
   { id: "max_q", key: "1", label: "Max Q", phase: "ascent", severity: 6, scriptTPlusSec: 58, group: "ascent" },
-  { id: "meco", key: "2", label: "Super Heavy MECO", phase: "ascent", severity: 7, scriptTPlusSec: 138, group: "ascent" },
+  { id: "meco", key: "2", label: "MECO", phase: "ascent", severity: 7, scriptTPlusSec: 138, group: "ascent" },
   { id: "hot_stage", key: "3", label: "Hot-staging / sep", phase: "ascent", severity: 9, scriptTPlusSec: 141, group: "ascent" },
+  { id: "stage_sep", key: "S", label: "Stage separation", phase: "ascent", severity: 8, scriptTPlusSec: 149, group: "falcon" },
+  { id: "ses1", key: "j", label: "SES-1 (2nd stage start)", phase: "ascent", severity: 7, scriptTPlusSec: 156, group: "falcon" },
+  { id: "fairing", key: "f", label: "Fairing separation", phase: "ascent", severity: 6, scriptTPlusSec: 177, group: "falcon" },
 
-  // Booster
+  // Booster / first stage
   { id: "boostback_start", key: "4", label: "Boostback burn start", phase: "booster", severity: 7, scriptTPlusSec: 145, group: "booster" },
   { id: "boostback_end", key: "5", label: "Boostback end", phase: "booster", severity: 6, scriptTPlusSec: 183, group: "booster" },
-  { id: "landing_burn_booster", key: "6", label: "Booster landing burn", phase: "booster", severity: 8, scriptTPlusSec: 387, group: "booster" },
+  { id: "entry_burn", key: "b", label: "1st stage entry burn start", phase: "booster", severity: 7, scriptTPlusSec: 359, group: "falcon" },
+  { id: "entry_burn_end", key: "B", label: "1st stage entry burn end", phase: "booster", severity: 6, scriptTPlusSec: 382, group: "falcon" },
+  { id: "landing_burn_booster", key: "6", label: "Booster / 1st stage landing burn", phase: "booster", severity: 8, scriptTPlusSec: 387, group: "booster" },
+  { id: "booster_landing", key: "L", label: "1st stage landing (ASDS / LZ)", phase: "booster", severity: 9, scriptTPlusSec: 498, group: "falcon" },
   { id: "booster_splash", key: "7", label: "Booster splashdown / impact", phase: "booster", severity: 8, scriptTPlusSec: 413, group: "booster" },
   { id: "booster_catch", key: "c", label: "Booster catch (tower)", phase: "booster", severity: 9, scriptTPlusSec: null, group: "booster" },
 
-  // Ship
-  { id: "seco", key: "8", label: "Ship SECO", phase: "ship", severity: 7, scriptTPlusSec: 485, group: "ship" },
+  // Upper stage / ship / payload
+  { id: "seco", key: "8", label: "SECO / SECO-1", phase: "ship", severity: 7, scriptTPlusSec: 485, group: "ship" },
+  { id: "ses2", key: "J", label: "SES-2 (2nd stage restart)", phase: "ship", severity: 7, scriptTPlusSec: 3155, group: "falcon" },
+  { id: "seco2", key: "u", label: "SECO-2", phase: "ship", severity: 6, scriptTPlusSec: 3156, group: "falcon" },
   { id: "deploy_start", key: "d", label: "Payload deploy start", phase: "ship", severity: 8, scriptTPlusSec: 1000, group: "ship" },
   { id: "deploy_done", key: "D", label: "Payload deploy complete", phase: "ship", severity: 7, scriptTPlusSec: 1659, group: "ship" },
   { id: "relight", key: "r", label: "In-space Raptor relight", phase: "ship", severity: 8, scriptTPlusSec: 2338, group: "ship" },

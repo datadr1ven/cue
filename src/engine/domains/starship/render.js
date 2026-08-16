@@ -34,7 +34,21 @@ function emojiFor(id) {
     case "liftoff":
       return "🚀";
     case "hot_stage":
+    case "stage_sep":
       return "🔥";
+    case "ses1":
+    case "ses2":
+    case "relight":
+      return "♻️";
+    case "fairing":
+      return "🛡️";
+    case "entry_burn":
+    case "entry_burn_end":
+    case "entry":
+      return "☄️";
+    case "booster_landing":
+    case "landing_burn_booster":
+      return "🛬";
     case "booster_catch":
       return "🦾";
     case "booster_splash":
@@ -43,10 +57,10 @@ function emojiFor(id) {
     case "deploy_start":
     case "deploy_done":
       return "📡";
-    case "relight":
-      return "♻️";
-    case "entry":
-      return "☄️";
+    case "seco":
+    case "seco2":
+    case "meco":
+      return "⏹️";
     case "los":
       return "📡❌";
     case "anomaly":

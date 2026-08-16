@@ -1,5 +1,5 @@
 {
-  "defaultMissionId": "starship-flight-13",
+  "defaultMissionId": "starlink-sl-17-50",
   "missions": [
     {
       "id": "starship-flight-12",
@@ -12,6 +12,12 @@
       "number": 13,
       "label": "Starship Flight 13",
       "file": "flights/starship-flight-13-script.json"
+    },
+    {
+      "id": "starlink-sl-17-50",
+      "number": 1750,
+      "label": "Starlink 17-50",
+      "file": "flights/starlink-sl-17-50-script.json"
     }
   ]
 }

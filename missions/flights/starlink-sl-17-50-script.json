@@ -1,0 +1,27 @@
+{
+  "missionId": "starlink-sl-17-50",
+  "missionName": "Starlink 17-50",
+  "vehicle": "Falcon 9",
+  "site": "SLC-4E, Vandenberg SFB",
+  "landing": "Of Course I Still Love You (Pacific droneship)",
+  "source": "https://www.spacex.com/launches/sl-17-50",
+  "notes": "24 Starlink sats. Window Aug 19 2026 11:00–15:00 JST (02:00–06:00 UTC) / Aug 18 19:00–23:00 PT. launchApproxUtc is window OPEN — press liftoff on video truth. All T+ times approximate from SpaceX page. Booster flight 12; ASDS OCISLY.",
+  "launchApproxUtc": "2026-08-19T02:00:00Z",
+  "windowCloseUtc": "2026-08-19T06:00:00Z",
+  "script": [
+    { "tPlusSec": 0, "actionId": "liftoff", "label": "Falcon 9 liftoff" },
+    { "tPlusSec": 68, "actionId": "max_q", "label": "Max Q" },
+    { "tPlusSec": 145, "actionId": "meco", "label": "1st stage MECO" },
+    { "tPlusSec": 149, "actionId": "stage_sep", "label": "1st and 2nd stages separate" },
+    { "tPlusSec": 156, "actionId": "ses1", "label": "2nd stage engine starts (SES-1)" },
+    { "tPlusSec": 177, "actionId": "fairing", "label": "Fairing separation" },
+    { "tPlusSec": 359, "actionId": "entry_burn", "label": "1st stage entry burn begins" },
+    { "tPlusSec": 382, "actionId": "entry_burn_end", "label": "1st stage entry burn ends" },
+    { "tPlusSec": 476, "actionId": "landing_burn_booster", "label": "1st stage landing burn begins" },
+    { "tPlusSec": 498, "actionId": "booster_landing", "label": "1st stage landing (OCISLY)" },
+    { "tPlusSec": 520, "actionId": "seco", "label": "2nd stage engine cutoff (SECO-1)" },
+    { "tPlusSec": 3155, "actionId": "ses2", "label": "2nd stage engine starts (SES-2)" },
+    { "tPlusSec": 3156, "actionId": "seco2", "label": "2nd stage engine cutoff (SECO-2)" },
+    { "tPlusSec": 3687, "actionId": "deploy_start", "label": "Starlink satellites deploy" }
+  ]
+}

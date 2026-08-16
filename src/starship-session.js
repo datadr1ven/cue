@@ -96,6 +96,11 @@ export function createStarshipSession(opts = {}) {
     const scriptT = tPlusByAction.has(actionId)
       ? tPlusByAction.get(actionId)
       : action.scriptTPlusSec;
+    // Prefer mission script wording (Falcon vs Starship) when present
+    const scriptRow = Array.isArray(scriptDoc?.script)
+      ? scriptDoc.script.find((r) => r.actionId === actionId)
+      : null;
+    const label = scriptRow?.label || action.label;
 
     const event = {
       type: "starship.action",
@@ -103,7 +108,7 @@ export function createStarshipSession(opts = {}) {
       source: "manual",
       payload: {
         actionId: action.id,
-        label: action.label,
+        label,
         phase: action.phase,
         severity: action.severity,
         scriptTPlusSec: scriptT ?? null,
