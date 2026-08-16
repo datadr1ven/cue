@@ -4,7 +4,10 @@ import {
   normalizeSessionKind,
   flushExpiredPits,
 } from "./snapshot.js";
-import { detectF1Moments } from "./moments.js";
+import {
+  detectF1Moments,
+  applyOrderHeartbeatBookkeeping,
+} from "./moments.js";
 import { renderF1Moment } from "./render.js";
 
 /**
@@ -27,6 +30,7 @@ export function createF1Domain(config = {}) {
     detectMoments: detectF1Moments,
     renderMoment: renderF1Moment,
     flushPending: flushExpiredPits,
+    applyOrderHeartbeatBookkeeping,
   };
 }
 
@@ -39,4 +43,7 @@ export {
   normalizeSessionKind,
   SESSION_KINDS,
   buildPracticeRecap,
+  resolveFinishOrder,
+  isPositionMapSane,
+  finishOrderFromLaps,
 } from "./snapshot.js";

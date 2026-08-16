@@ -87,7 +87,7 @@ export function renderF1Moment(moment, state) {
     }
 
     case "session.finished":
-      return withHead(head, finishLine("Session finished", d.top5));
+      return withHead(head, raceFinishLine("Session finished", d));
 
     case "session.chequered": {
       if (d.practice) {
@@ -112,13 +112,10 @@ export function renderF1Moment(moment, state) {
         }
         return withHead(head, lines.join("\n"));
       }
-      return withHead(
-        head,
-        finishLine(
-          d.label ? `🏁 ${d.label} · chequered` : "🏁 Chequered flag",
-          d.top5 || formatLeader(d),
-        ),
-      );
+      const title = d.label
+        ? `🏁 ${d.label} · chequered`
+        : "🏁 Chequered flag";
+      return withHead(head, raceFinishLine(title, d));
     }
 
     case "flag.vsc":
@@ -144,6 +141,14 @@ export function renderF1Moment(moment, state) {
         head,
         `📊 ${d.driverName} ${dir} P${d.fromPos}→P${d.toPos}`,
       );
+    }
+
+    case "order.snapshot": {
+      const line =
+        Array.isArray(d.top5) && d.top5.length
+          ? d.top5.map((x) => `P${x.pos} ${x.name}`).join(" · ")
+          : "—";
+      return withHead(head, `📋 Order (approx): ${line}`);
     }
 
     case "strategy.pit": {
@@ -239,6 +244,27 @@ function finishLine(prefix, top5) {
   }
   if (typeof top5 === "string") return `${prefix}: ${top5}`;
   return prefix;
+}
+
+/**
+ * Race finish: official-looking board, or provisional from lap times.
+ * @param {string} prefix
+ * @param {object} d
+ */
+function raceFinishLine(prefix, d) {
+  const top5 = d.top5;
+  if (!Array.isArray(top5) || !top5.length) {
+    return prefix;
+  }
+  if (d.provisional && d.orderSource === "laps") {
+    const line = top5.map((x) => x.name).join(" · ");
+    const win = d.winnerName ? `Winner (provisional): ${d.winnerName}\n` : "";
+    return `${prefix}\n${win}${line}\n(from lap times · board incomplete)`;
+  }
+  if (d.provisional) {
+    return `${finishLine(`${prefix} (approx)`, top5)}`;
+  }
+  return finishLine(prefix, top5);
 }
 
 function formatLeader(d) {

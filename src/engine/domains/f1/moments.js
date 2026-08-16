@@ -16,9 +16,25 @@ import {
   phaseLabel,
   buildPracticeRecap,
   buildPitMoment,
+  resolveFinishOrder,
 } from "./snapshot.js";
 
 const SESSION_BEST_COOLDOWN_MS = 20_000;
+/** Race/sprint: top-5 board if quiet this long (event time). */
+export const ORDER_PULSE_MS = 12 * 60 * 1000;
+
+const ORDER_NOISE_TYPES = new Set([
+  "order.leader_change",
+  "order.big_swing",
+  "order.snapshot",
+  "strategy.pit",
+  "flag.vsc",
+  "flag.safety_car",
+  "flag.red",
+  "session.started",
+  "session.chequered",
+  "session.finished",
+]);
 
 /**
  * @param {object} prev
@@ -71,7 +87,109 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromRadio(next, p, t));
   }
 
+  // Deferred race finish (after chequered + lap completions)
+  if (next._raceFinishEmit) {
+    const e = next._raceFinishEmit;
+    moments.push(
+      buildRaceFinishMomentFromResolved(
+        next,
+        e.eventT || t,
+        e.msg || "",
+        e.type || "session.chequered",
+        e.severity ?? 9,
+        e.resolved,
+      ),
+    );
+  }
+
+  // Race/sprint heartbeat when the order has been quiet under green
+  moments.push(...maybeOrderPulse(next, event));
+
   return moments;
+}
+
+/**
+ * Apply silence / pulse timestamps after moments are chosen (pipeline calls this).
+ * @param {object} state
+ * @param {import('../../types.js').IngestEvent} event
+ * @param {import('../../types.js').Moment[]} moments
+ */
+export function applyOrderHeartbeatBookkeeping(state, event, moments) {
+  let next = state;
+  const t = event?.t || state.lastEventT;
+  let noise = false;
+  let pulsed = false;
+  for (const m of moments) {
+    if (ORDER_NOISE_TYPES.has(m.type)) noise = true;
+    if (m.type === "order.snapshot") pulsed = true;
+  }
+  if (noise || pulsed) {
+    next = {
+      ...next,
+      lastOrderNoiseT: t || next.lastOrderNoiseT,
+    };
+  }
+  if (pulsed) {
+    next = {
+      ...next,
+      lastOrderPulseT: t || next.lastOrderPulseT,
+      lastOrderNoiseT: t || next.lastOrderNoiseT,
+    };
+  }
+  return next;
+}
+
+function maybeOrderPulse(state, event) {
+  if (!isRaceStyleMode(state)) return [];
+  if (isPracticeMode(state) || isKnockoutMode(state) || isQualifyingMode(state)) {
+    return [];
+  }
+  if (state.chequered || !state.sessionActive) return [];
+  const status = state.trackStatus;
+  if (status && status !== "green" && status !== "yellow") return [];
+  // yellow OK for soft pulse? Suppress yellow too for safety — only full green
+  if (status === "yellow") return [];
+
+  const t = event.t || state.lastEventT;
+  const tMs = toMs(t);
+  if (tMs == null) return [];
+
+  const silenceFrom =
+    state.lastOrderNoiseT || state.segmentStartT || state.lastEventT;
+  const silenceFromMs = toMs(silenceFrom);
+  if (silenceFromMs == null) return [];
+  if (tMs - silenceFromMs < ORDER_PULSE_MS) return [];
+
+  const lastPulseMs = toMs(state.lastOrderPulseT);
+  if (lastPulseMs != null && tMs - lastPulseMs < ORDER_PULSE_MS) return [];
+
+  const top5 = topN(state, 5);
+  if (top5.length < 3) return [];
+
+  return [
+    {
+      id: `order-snapshot-${t}`,
+      type: "order.snapshot",
+      severity: 6,
+      t,
+      data: {
+        top5,
+        approx: true,
+        label: phaseLabel(state) || "Race",
+        ...contextFields(state, phaseLabel(state)),
+      },
+    },
+  ];
+}
+
+function toMs(t) {
+  if (t == null) return null;
+  let s = String(t).trim();
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = s + "Z";
+  }
+  const n = new Date(s).getTime();
+  return Number.isFinite(n) ? n : null;
 }
 
 function fromRaceControl(prev, next, p, t) {
@@ -218,43 +336,31 @@ function fromRaceControl(prev, next, p, t) {
           },
         });
       }
+    } else if (
+      // Race/sprint: deferred via pendingRaceFinish (wait for lap times)
+      next.pendingRaceFinish ||
+      next.raceFinishEmitted ||
+      next._raceFinishEmit
+    ) {
+      // no immediate board — see maybeReadyRaceFinish / _raceFinishEmit
     } else {
-      // Race / sprint finish
-      out.push({
-        id: `chequered-${t}`,
-        type: "session.chequered",
-        severity: 9,
-        t,
-        data: {
-          message: msg,
-          top5: topN(next, 5),
-          leader: next.leader,
-          leaderName: next.leader != null ? driverLabel(next, next.leader) : null,
-          label: phaseLabel(next),
-          ...contextFields(next, phaseLabel(next)),
-        },
-      });
+      // Fallback if deferral didn't arm (shouldn't happen often)
+      out.push(buildRaceFinishMoment(next, t, msg, "session.chequered", 9));
     }
   }
 
   if (up.includes("SESSION FINISHED") && !up.includes("CHEQUERED")) {
     // Knockout: cut/pole cover the story. Practice: chequered path preferred.
+    // Race: skip if chequered already armed/emitted a finish board
     if (
       !isQualifyingMode(next) &&
       !isKnockoutMode(next) &&
-      !isPracticeMode(next)
+      !isPracticeMode(next) &&
+      !next.pendingRaceFinish &&
+      !next.raceFinishEmitted &&
+      !next._raceFinishEmit
     ) {
-      out.push({
-        id: `session-finished-${t}`,
-        type: "session.finished",
-        severity: 7,
-        t,
-        data: {
-          message: msg,
-          top5: topN(next, 5),
-          ...contextFields(next, phaseLabel(next)),
-        },
-      });
+      out.push(buildRaceFinishMoment(next, t, msg, "session.finished", 7));
     }
   }
 
@@ -423,26 +529,27 @@ function fromPosition(prev, next, p, t) {
 
 function fromRadio(state, p, t) {
   const num = Number(p.driver_number);
-  const pos = state.position[num];
+  const pos = state.position[num] != null ? Number(state.position[num]) : null;
+  const isLeader = state.leader != null && Number(state.leader) === num;
+  // Soft-launch: leaders / top 10 only (unknown position dropped)
+  if (!isLeader && (pos == null || pos > 10)) return [];
+
   const stint = state.stints[num];
   const compound =
     stint?.compound && stint.compound !== "UNKNOWN" ? stint.compound : null;
-  // Default floor is 6 — was 5 so radios never fired
-  const severity = isQualifyingMode(state) || state.sessionKind === "qualifying"
-    ? 6
-    : 6;
+  // Severity 5 → off at default ENGINE_MIN_SEVERITY=6; enable with --radios / min 5
   return [
     {
       id: `radio-${num}-${p.recording_url || t}`,
       type: "radio.clip",
-      severity,
+      severity: 5,
       t,
       entities: [num],
       data: {
         driver: num,
         driverName: driverLabel(state, num),
         url: p.recording_url,
-        position: pos != null ? Number(pos) : null,
+        position: pos,
         trackStatus: state.trackStatus,
         leaderName:
           state.leader != null ? driverLabel(state, state.leader) : null,
@@ -543,6 +650,54 @@ function enrichOrder(state, rows) {
   }));
 }
 
+/**
+ * Race/sprint chequered or finished with best-available order.
+ * @param {object} state
+ * @param {string} t
+ * @param {string} msg
+ * @param {'session.chequered'|'session.finished'} type
+ * @param {number} severity
+ */
+function buildRaceFinishMoment(state, t, msg, type, severity) {
+  return buildRaceFinishMomentFromResolved(
+    state,
+    t,
+    msg,
+    type,
+    severity,
+    resolveFinishOrder(state, 5),
+  );
+}
+
+function buildRaceFinishMomentFromResolved(
+  state,
+  t,
+  msg,
+  type,
+  severity,
+  resolved,
+) {
+  const top5 = enrichOrder(state, resolved.rows);
+  const winner = top5[0] || null;
+  return {
+    id: `${type}-${t}`,
+    type,
+    severity,
+    t,
+    data: {
+      message: msg,
+      top5,
+      provisional: resolved.provisional,
+      orderSource: resolved.source,
+      winnerName: winner?.name || null,
+      leader: winner?.driver ?? state.leader,
+      leaderName: winner?.name || null,
+      label: phaseLabel(state),
+      ...contextFields(state, phaseLabel(state)),
+    },
+  };
+}
+
 function segmentLabel(seg, kind = "qualifying") {
   return knockoutSegmentLabel(seg, kind);
 }
@@ -577,10 +732,4 @@ function formatLapTime(sec) {
   const rem = s - m * 60;
   if (m <= 0) return rem.toFixed(3);
   return `${m}:${rem.toFixed(3).padStart(6, "0")}`;
-}
-
-function toMs(t) {
-  if (t == null) return null;
-  const n = new Date(t).getTime();
-  return Number.isFinite(n) ? n : null;
 }

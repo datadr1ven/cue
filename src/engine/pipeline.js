@@ -46,10 +46,18 @@ export function createPipeline(configOverrides = {}) {
     const rawMoments = domain.detectMoments(prev, next, event) || [];
     const moments = gate.filter(rawMoments, config.usePrefs ? prefs : null);
 
+    // F1 race/sprint order heartbeat timestamps
+    if (
+      config.domain === "f1" &&
+      typeof domain.applyOrderHeartbeatBookkeeping === "function"
+    ) {
+      state = domain.applyOrderHeartbeatBookkeeping(state, event, moments);
+    }
+
     /** @type {import('./types.js').Alert[]} */
     const alerts = [];
     for (const moment of moments) {
-      let text = domain.renderMoment(moment, next);
+      let text = domain.renderMoment(moment, state);
       let renderSource = "template";
 
       if (config.useLlm) {

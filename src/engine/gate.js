@@ -20,7 +20,11 @@ export function createGate(config) {
   function filter(moments, prefs = null) {
     const out = [];
     for (const m of moments) {
-      if (m.severity < config.minSeverity) continue;
+      const radioBypass =
+        m.type === "radio.clip" &&
+        config.includeRadios &&
+        m.severity >= 5;
+      if (m.severity < config.minSeverity && !radioBypass) continue;
 
       if (config.usePrefs && prefs) {
         // Future: filter by follows / interests

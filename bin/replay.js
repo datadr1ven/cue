@@ -18,8 +18,8 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--json") args.json = true;
     else if (a === "--radios") {
+      // Include severity-5 team radio without lowering the global floor
       args.radios = true;
-      if (args.minSeverity === 6) args.minSeverity = 5;
     } else if (a === "--min-severity") args.minSeverity = Number(argv[++i]);
     else if (a.startsWith("--min-severity="))
       args.minSeverity = Number(a.split("=")[1]);
@@ -44,6 +44,7 @@ async function main() {
     useLlm: false,
     usePrefs: false,
     minSeverity: args.minSeverity,
+    includeRadios: args.radios,
   });
 
   let events = 0;

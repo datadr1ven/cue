@@ -83,6 +83,15 @@ export function createF1State() {
     pendingPits: {},
     /** One-shot: set when stint update closes a pending pit (detector consumes). */
     _pitCombined: null,
+    /**
+     * Race finish deferred until lap-completion order is available (or timeout).
+     * { eventT, wallMs, msg, type, severity }
+     */
+    pendingRaceFinish: null,
+    /** One-shot emit payload for detector */
+    _raceFinishEmit: null,
+    /** Already sent race finish this session (avoid double chequered+finished) */
+    raceFinishEmitted: false,
     leader: null,
     weather: null,
     lastEventT: null,
@@ -97,7 +106,21 @@ export function createF1State() {
     /** Best complete flying lap this session */
     sessionBest: null, // { driver, timeSec, t, lap }
     lastSessionBestAlertT: null,
+    /**
+     * Race/sprint order heartbeat: event-time of last "order noise"
+     * (lead change, swing, pit, flags, or prior snapshot).
+     */
+    lastOrderNoiseT: null,
+    /** Event-time of last order.snapshot pulse */
+    lastOrderPulseT: null,
     completeLapCount: 0,
+    /** driver → max lap_number seen (any lap message) */
+    maxLapByDriver: {},
+    /**
+     * driver → last completed flying lap with duration
+     * { lap, t, duration }
+     */
+    lapFinishAt: {},
     sessionName: null,
     sessionType: null,
   };
@@ -148,7 +171,14 @@ export function reduceF1(state, event, opts = {}) {
       : [],
     pendingPits: { ...(state.pendingPits || {}) },
     _pitCombined: null,
+    pendingRaceFinish: state.pendingRaceFinish
+      ? { ...state.pendingRaceFinish }
+      : null,
+    _raceFinishEmit: null,
+    raceFinishEmitted: Boolean(state.raceFinishEmitted),
     sessionBest: state.sessionBest ? { ...state.sessionBest } : null,
+    maxLapByDriver: { ...(state.maxLapByDriver || {}) },
+    lapFinishAt: { ...(state.lapFinishAt || {}) },
   };
 
   if (opts.sessionKind && !next.sessionKindForced) {
@@ -183,6 +213,9 @@ export function reduceF1(state, event, opts = {}) {
     next.compoundsSeen = [];
     next.pendingPits = {};
     next._pitCombined = null;
+    next.pendingRaceFinish = null;
+    next._raceFinishEmit = null;
+    next.raceFinishEmitted = false;
     next.leader = null;
     next.trackStatus = null;
     next.sessionActive = false;
@@ -195,7 +228,11 @@ export function reduceF1(state, event, opts = {}) {
     next.endedSegment = null;
     next.sessionBest = null;
     next.lastSessionBestAlertT = null;
+    next.lastOrderNoiseT = null;
+    next.lastOrderPulseT = null;
     next.completeLapCount = 0;
+    next.maxLapByDriver = {};
+    next.lapFinishAt = {};
     next.sessionName = null;
     next.sessionType = null;
     next.meetingName = null;
@@ -341,8 +378,46 @@ export function reduceF1(state, event, opts = {}) {
       break;
   }
 
+  maybeReadyRaceFinish(next);
   ensureFallbackDrivers(next);
   return next;
+}
+
+/**
+ * After chequered, emit as soon as ≥3 lead-lap finishers exist from lap times.
+ * Fall back only after this long if lap board never fills (missing P1 glitch recovery).
+ */
+export const RACE_FINISH_WAIT_MS = 25_000;
+
+/**
+ * If a race finish is pending and we have lap order (or timed out), stage emit.
+ * @param {object} state
+ */
+function maybeReadyRaceFinish(state) {
+  const pending = state.pendingRaceFinish;
+  if (!pending || state.raceFinishEmitted) return;
+
+  const resolved = resolveFinishOrder(state, 5);
+  const tMs = toMs(state.lastEventT);
+  const pMs = toMs(pending.eventT);
+  const waitedEvent =
+    tMs != null && pMs != null && tMs - pMs >= RACE_FINISH_WAIT_MS;
+  const waitedWall =
+    Date.now() - (pending.wallMs || 0) >= RACE_FINISH_WAIT_MS;
+  const nLaps =
+    resolved.source === "laps" ? resolved.rows.length : 0;
+  // ≥5 lead-lap finishers → emit immediately; ≥3 after timeout; else weak timeout
+  const solidLaps = nLaps >= 5;
+  const okLaps = nLaps >= 3 && (waitedEvent || waitedWall);
+
+  if (solidLaps || okLaps || waitedEvent || waitedWall) {
+    state._raceFinishEmit = {
+      ...pending,
+      resolved,
+    };
+    state.pendingRaceFinish = null;
+    state.raceFinishEmitted = true;
+  }
 }
 
 function applyMeetingPayload(state, p) {
@@ -487,21 +562,42 @@ export const PIT_COMPOUND_WAIT_MS = 5_000;
  * @returns {{ state: object, moments: import('../../types.js').Moment[] }}
  */
 export function flushExpiredPits(state, nowMs = Date.now()) {
+  let next = state;
   const pending = { ...(state.pendingPits || {}) };
   /** @type {import('../../types.js').Moment[]} */
   const moments = [];
   let changed = false;
   for (const [key, pit] of Object.entries(pending)) {
     if (nowMs - (pit.wallMs || 0) < PIT_COMPOUND_WAIT_MS) continue;
-    moments.push(buildPitMoment(pit, { timedOut: true, state }));
+    moments.push(buildPitMoment(pit, { timedOut: true, state: next }));
     delete pending[key];
     changed = true;
   }
+  if (changed) {
+    next = { ...next, pendingPits: pending };
+  }
+
+  // Force race finish if still waiting (live wall clock)
+  if (
+    next.pendingRaceFinish &&
+    !next.raceFinishEmitted &&
+    nowMs - (next.pendingRaceFinish.wallMs || 0) >= RACE_FINISH_WAIT_MS
+  ) {
+    const resolved = resolveFinishOrder(next, 5);
+    next = {
+      ...next,
+      _raceFinishEmit: {
+        ...next.pendingRaceFinish,
+        resolved,
+      },
+      pendingRaceFinish: null,
+      raceFinishEmitted: true,
+    };
+    changed = true;
+  }
+
   if (!changed) return { state, moments: [] };
-  return {
-    state: { ...state, pendingPits: pending },
-    moments,
-  };
+  return { state: next, moments };
 }
 
 /**
@@ -512,6 +608,7 @@ export function buildPitMoment(pit, opts = {}) {
   const num = Number(pit.driver);
   const compoundOn = opts.compoundOn ?? pit.compoundOn ?? null;
   const posIn = pit.positionIn;
+  // Midfield pits stay sev 5 (below default floor 6); leaders/top 10 are 6–7
   let severity = 5;
   if (posIn != null && posIn <= 3) severity = 7;
   else if (posIn != null && posIn <= 10) severity = 6;
@@ -604,6 +701,17 @@ export function isRaceStyleMode(state) {
 }
 
 function applyLap(state, p, t) {
+  const driver = Number(p.driver_number);
+  if (!Number.isFinite(driver)) return;
+
+  const ln = p.lap_number != null ? Number(p.lap_number) : null;
+  if (ln != null && Number.isFinite(ln)) {
+    state.maxLapByDriver[driver] = Math.max(
+      state.maxLapByDriver[driver] || 0,
+      ln,
+    );
+  }
+
   const dur = p.lap_duration;
   if (dur == null || !Number.isFinite(Number(dur))) return;
   if (p.is_pit_out_lap) return;
@@ -614,7 +722,24 @@ function applyLap(state, p, t) {
   state.completeLapCount = (state.completeLapCount || 0) + 1;
   maybePromoteRaceByDuration(state, t);
 
-  const driver = Number(p.driver_number);
+  // Finish-order inference: when this lap was *completed*
+  // OpenF1 often sets t/date_start to lap start — add duration for finish time.
+  if (ln != null && Number.isFinite(ln)) {
+    const startMs = toMs(p.date_start || t);
+    const finishT =
+      startMs != null
+        ? new Date(startMs + timeSec * 1000).toISOString()
+        : t || null;
+    const prevFin = state.lapFinishAt[driver];
+    if (!prevFin || ln >= prevFin.lap) {
+      state.lapFinishAt[driver] = {
+        lap: ln,
+        t: finishT,
+        duration: timeSec,
+      };
+    }
+  }
+
   const prev = state.sessionBest;
   if (!prev || timeSec < prev.timeSec - 1e-9) {
     state.sessionBest = {
@@ -630,6 +755,103 @@ function applyLap(state, p, t) {
   } else if (state.sessionBest) {
     state.sessionBest = { ...state.sessionBest, _improved: false };
   }
+}
+
+/**
+ * Position board is trustworthy if it has a unique P1 and no duplicate slots.
+ * @param {object} state
+ */
+export function isPositionMapSane(state) {
+  const rows = orderedField(state, 30);
+  if (rows.length < 3) return false;
+  const seen = new Set();
+  let hasP1 = false;
+  for (const r of rows) {
+    if (r.pos === 1) hasP1 = true;
+    if (seen.has(r.pos)) return false;
+    seen.add(r.pos);
+  }
+  return hasP1;
+}
+
+/**
+ * Rank cars that completed race distance by time of that lap's completion.
+ * @param {object} state
+ * @param {number} [n]
+ * @returns {{ driver: number, pos: number, lap: number, t: string|null }[]}
+ */
+export function finishOrderFromLaps(state, n = 10) {
+  const maxLaps = state.maxLapByDriver || {};
+  const finishes = state.lapFinishAt || {};
+  const vals = Object.values(maxLaps).map(Number).filter((x) => Number.isFinite(x));
+  if (!vals.length) return [];
+  const raceLaps = Math.max(...vals);
+  if (!Number.isFinite(raceLaps) || raceLaps < 1) return [];
+
+  /** @type {{ driver: number, lap: number, t: string|null, duration: number }[]} */
+  const candidates = [];
+  for (const [dStr, info] of Object.entries(finishes)) {
+    const driver = Number(dStr);
+    if (!info || info.lap == null) continue;
+    // Lead lap: completed the race-distance lap (or more, if feed overshoots)
+    if (Number(info.lap) >= raceLaps) {
+      candidates.push({
+        driver,
+        lap: Number(info.lap),
+        t: info.t || null,
+        duration: info.duration,
+      });
+    }
+  }
+  candidates.sort((a, b) => {
+    const ta = toMs(a.t);
+    const tb = toMs(b.t);
+    if (ta == null && tb == null) return a.driver - b.driver;
+    if (ta == null) return 1;
+    if (tb == null) return -1;
+    return ta - tb;
+  });
+
+  return candidates.slice(0, n).map((c, i) => ({
+    driver: c.driver,
+    pos: i + 1,
+    lap: c.lap,
+    t: c.t,
+  }));
+}
+
+/**
+ * Best available finishing order for race/sprint chequered.
+ * @param {object} state
+ * @param {number} [n]
+ * @returns {{
+ *   rows: { driver: number, pos: number }[],
+ *   provisional: boolean,
+ *   source: 'position'|'laps'|'position_weak',
+ * }}
+ */
+export function resolveFinishOrder(state, n = 5) {
+  const fromPos = orderedField(state, Math.max(n, 10));
+  if (isPositionMapSane(state) && fromPos.length >= 3) {
+    return {
+      rows: fromPos.slice(0, n),
+      provisional: false,
+      source: "position",
+    };
+  }
+  const fromLaps = finishOrderFromLaps(state, n);
+  if (fromLaps.length >= 3) {
+    return {
+      rows: fromLaps.slice(0, n),
+      provisional: true,
+      source: "laps",
+    };
+  }
+  return {
+    rows: fromPos.slice(0, n),
+    provisional: true,
+    source: "position_weak",
+  };
 }
 
 /**
@@ -690,6 +912,9 @@ function applyRaceControl(state, p, t) {
     state.awaitingNextSegment = false;
     state.segmentStartT = t || state.lastEventT;
     state.trackStatus = "green";
+    // Heartbeat silence clock starts at lights-out / restart
+    state.lastOrderNoiseT = t || state.lastEventT;
+    state.lastOrderPulseT = null;
     // Fresh knockout segment: reset session-best
     if (isKnockoutMode(state) && state.segment > 1) {
       state.sessionBest = null;
@@ -710,6 +935,22 @@ function applyRaceControl(state, p, t) {
     state.endedSegment = state.segment || 1;
     state.orderAtChequered = orderedField(state, 30);
     state.awaitingNextSegment = true;
+
+    // Race/sprint: defer finish board until lap completions arrive (often ~1s later)
+    if (
+      !state.raceFinishEmitted &&
+      !isPracticeMode(state) &&
+      !isKnockoutMode(state) &&
+      (isRaceStyleMode(state) || state.sessionKind === "unknown")
+    ) {
+      state.pendingRaceFinish = {
+        eventT: t || state.lastEventT,
+        wallMs: Date.now(),
+        msg: String(p.message || "CHEQUERED FLAG"),
+        type: "session.chequered",
+        severity: 9,
+      };
+    }
 
     // Classify unknown sessions at first chequered
     if (!state.sessionKindForced && state.sessionKind === "unknown") {
@@ -743,6 +984,7 @@ function applyRaceControl(state, p, t) {
   }
   if (msg.includes("VSC ENDING") || msg.includes("VSC IN THIS LAP")) {
     state.trackStatus = "green";
+    state.lastOrderNoiseT = t || state.lastEventT; // restart silence after neutralisation
     return;
   }
 
@@ -760,6 +1002,7 @@ function applyRaceControl(state, p, t) {
   }
   if (msg.includes("SAFETY CAR IN") || msg.includes("SAFETY CAR ENDING")) {
     state.trackStatus = "green";
+    state.lastOrderNoiseT = t || state.lastEventT;
     return;
   }
 
@@ -771,7 +1014,13 @@ function applyRaceControl(state, p, t) {
     return;
   }
   if (flag === "GREEN" || msg === "TRACK CLEAR") {
-    if (state.trackStatus !== "chequered") state.trackStatus = "green";
+    if (state.trackStatus !== "chequered") {
+      const wasNeutral = ["vsc", "safety_car", "red", "yellow"].includes(
+        state.trackStatus,
+      );
+      state.trackStatus = "green";
+      if (wasNeutral) state.lastOrderNoiseT = t || state.lastEventT;
+    }
     return;
   }
   if (flag === "YELLOW" || msg.includes("YELLOW IN TRACK")) {
