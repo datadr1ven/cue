@@ -26,6 +26,16 @@ import {
   parseNoteOrBroadcast,
   largestPhotoFileId,
 } from "../../src/tplus-commands.js";
+import {
+  INBOX_KV_KEY,
+  INBOX_USER_ACK,
+  appendInbox,
+  formatInboxList,
+  inboxEntryFromMessage,
+  normalizeInbox,
+  parseReplyArgs,
+  resolveInboxTarget,
+} from "../../src/telegram-inbox.js";
 
 const loader = {
   loadMission: bundledLoadMission,
@@ -76,6 +86,26 @@ async function kvGetJson(kv, key, fallback) {
 
 async function kvPutJson(kv, key, value) {
   await kv.put(key, JSON.stringify(value));
+}
+
+async function loadInbox(kv) {
+  return normalizeInbox(await kvGetJson(kv, INBOX_KV_KEY, { messages: [] }));
+}
+
+async function saveInbox(kv, inbox) {
+  await kvPutJson(kv, INBOX_KV_KEY, normalizeInbox(inbox));
+}
+
+/** Store free-text / unlabeled photo; silent if nothing to store. */
+async function captureToInbox(kv, message, extra = {}) {
+  const entry = inboxEntryFromMessage(message, extra);
+  if (!entry.text && entry.kind === "text") return null;
+  if (!entry.text && entry.kind === "photo") {
+    entry.text = "(photo, no caption)";
+  }
+  const next = appendInbox(await loadInbox(kv), entry);
+  await saveInbox(kv, next);
+  return entry;
 }
 
 async function loadUsers(kv) {
@@ -277,7 +307,11 @@ function opsHelp() {
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/hype <hours>\n` +
-    `/mission use <n>`
+    `/mission use <n>\n` +
+    `/inbox — read free-text messages from users\n` +
+    `/inbox clear — wipe inbox\n` +
+    `/reply last <text> — DM the last inbox user\n` +
+    `/reply <userId|@user> <text> — DM that user`
   );
 }
 
@@ -299,14 +333,20 @@ async function handleMessage(env, kv, message) {
   const session = await getSession(env, kv);
   const admin = isAdmin(env, userId);
 
-  // Photo with caption /note … or /broadcast … (or admin tip if unlabeled)
+  // Photo with caption /note … or /broadcast … (or inbox if unlabeled free-text)
   if (photoFileId && !text.startsWith("/")) {
+    await captureToInbox(kv, message, {
+      text: text || "(photo, no caption)",
+      kind: "photo",
+    });
     if (admin) {
       await reply(
         env,
         chatId,
-        "To send a photo to subscribers, use caption:\n/note your text\nor\n/broadcast your text",
+        "Photo saved to /inbox.\nTo fan out to subscribers, caption with:\n/note your text\nor\n/broadcast your text",
       );
+    } else {
+      await reply(env, chatId, INBOX_USER_ACK);
     }
     return;
   }
@@ -331,7 +371,13 @@ async function handleMessage(env, kv, message) {
     }
   }
 
-  if (!text.startsWith("/")) return;
+  // Free-text (not a command) → KV inbox for ops
+  if (!text.startsWith("/")) {
+    if (!text.trim()) return;
+    await captureToInbox(kv, message, { text, kind: "text" });
+    await reply(env, chatId, INBOX_USER_ACK);
+    return;
+  }
 
   if (text.startsWith("/start")) {
     if (!canEnroll(env, userId)) {
@@ -475,10 +521,79 @@ async function handleMessage(env, kv, message) {
       return;
     }
     const r = await session.fireHype(hours);
+    if (!r.ok) {
+      await reply(env, chatId, r.error || "hype failed");
+      return;
+    }
     await persistSession(kv, session);
     const alertText = r.alerts[0]?.text || r.label;
     const n = await fanOut(env, kv, alertText);
     await reply(env, chatId, `Hype sent to ${n} subscriber(s).`);
+    return;
+  }
+
+  if (text.startsWith("/inbox")) {
+    if (!admin) {
+      await reply(env, chatId, "Admin only.");
+      return;
+    }
+    const raw = stripCmd(text, "inbox").toLowerCase();
+    if (raw === "clear" || raw === "wipe" || raw === "empty") {
+      await saveInbox(kv, { messages: [] });
+      await reply(env, chatId, "Inbox cleared.");
+      return;
+    }
+    const body = formatInboxList(await loadInbox(kv));
+    await reply(
+      env,
+      chatId,
+      body.length > 3900 ? body.slice(0, 3900) + "\n…" : body,
+    );
+    return;
+  }
+
+  if (text.startsWith("/reply")) {
+    if (!admin) {
+      await reply(env, chatId, "Admin only.");
+      return;
+    }
+    const parsed = parseReplyArgs(stripCmd(text, "reply"));
+    if (!parsed) {
+      await reply(
+        env,
+        chatId,
+        "Usage:\n/reply last <text>\n/reply <userId> <text>\n/reply @username <text>\n\n(userId is shown on each /inbox line)",
+      );
+      return;
+    }
+    const target = resolveInboxTarget(await loadInbox(kv), parsed.target);
+    if (!target.ok) {
+      await reply(env, chatId, target.error);
+      return;
+    }
+    const outbound = `💬 ${parsed.body}`.slice(0, 4000);
+    const extra = {};
+    if (target.entry?.messageId != null) {
+      extra.reply_to_message_id = target.entry.messageId;
+      extra.allow_sending_without_reply = true;
+    }
+    const r = await reply(env, target.chatId, outbound, extra);
+    if (!r?.ok) {
+      await reply(
+        env,
+        chatId,
+        `Failed to DM ${target.label} (${target.chatId}). ` +
+          `They must have opened the bot at least once. ` +
+          `(${r?.description || "telegram error"})`,
+      );
+      return;
+    }
+    await reply(
+      env,
+      chatId,
+      `Replied to ${target.label} (chat ${target.chatId}).`,
+    );
+    return;
   }
 }
 
