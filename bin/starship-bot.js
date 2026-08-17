@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * TPlus — Telegram surface for Starship (Cue domain).
+ * TPlus — local Telegram bot (Cue launch domain). Prefer CF Worker in prod.
  *
  * Subscribers: /start → data/users.json → alerts
  * Admins: TELEGRAM_ADMIN_IDS → /ops /note /broadcast /hype /mission use
@@ -19,8 +19,8 @@ import {
 } from "../src/users.js";
 import { deliver } from "../src/delivery.js";
 import {
-  STARSHIP_ACTIONS,
   formatTPlus,
+  opsActionsForScript,
 } from "../src/engine/domains/starship/index.js";
 import { createStarshipSession } from "../src/starship-session-node.js";
 import {
@@ -86,9 +86,10 @@ async function fanOut(text, media = {}) {
 }
 
 function opsKeyboard() {
+  const actions = opsActionsForScript(session.scriptDoc?.script || []);
   const rows = [];
   let row = [];
-  for (const a of STARSHIP_ACTIONS) {
+  for (const a of actions) {
     row.push(
       Markup.button.callback(`${a.key}:${a.label}`.slice(0, 64), `ss:${a.id}`),
     );
@@ -104,9 +105,9 @@ function opsKeyboard() {
 
 function userHelp() {
   return (
-    `TPlus — sparse Starship flight alerts\n\n` +
-    `/missions — list flights\n` +
-    `/mission <n> — browse nominal T+\n` +
+    `TPlus — sparse SpaceX launch alerts\n\n` +
+    `/missions — list missions\n` +
+    `/mission <n|id> — browse nominal T+\n` +
     `/eta — countdown to NET\n` +
     `/status — flight clock (if live)\n` +
     `/help — this message\n\n` +
@@ -118,11 +119,11 @@ function opsHelp() {
   return (
     userHelp() +
     `\n\nOps (admin)\n` +
-    `/ops — milestone buttons\n` +
+    `/ops — mission milestones + hold/go/anomaly\n` +
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/hype <hours> — e.g. /hype 48\n` +
-    `/mission use <n> — set active flight`
+    `/mission use <n|id> — set active mission`
   );
 }
 
@@ -237,7 +238,7 @@ bot.command("eta", async (ctx) => {
 bot.command("status", async (ctx) => {
   const st = session.status();
   const lines = [
-    st.missionName || "Starship",
+    st.missionName || "TPlus",
     st.tPlusLabel,
     `phase: ${st.phase}`,
     `last: ${st.lastActionId || "—"}`,
@@ -254,7 +255,11 @@ bot.command("ops", async (ctx) => {
     return;
   }
   const st = session.status();
-  await ctx.reply(`Ops — ${st.missionName || "Starship"}`, opsKeyboard());
+  const n = opsActionsForScript(session.scriptDoc?.script || []).length;
+  await ctx.reply(
+    `Ops — ${st.missionName || "mission"} (${n} buttons · script + hold/go/anomaly)`,
+    opsKeyboard(),
+  );
 });
 
 bot.command("note", async (ctx) => {

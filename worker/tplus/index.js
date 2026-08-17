@@ -13,8 +13,8 @@
 
 import { createStarshipSession } from "../../src/starship-session.js";
 import {
-  STARSHIP_ACTIONS,
   formatTPlus,
+  opsActionsForScript,
 } from "../../src/engine/domains/starship/index.js";
 import {
   bundledLoadMission,
@@ -269,10 +269,17 @@ async function persistSession(kv, session) {
   await kvPutJson(kv, KV_SESSION, session.exportState());
 }
 
-function opsKeyboard() {
+/**
+ * Mission-scoped ops pad: always-on (hold/go/anomaly/…) + active script.
+ * @param {object|null|undefined} session
+ */
+function opsKeyboard(session) {
+  const script = session?.scriptDoc?.script || [];
+  const actions = opsActionsForScript(script);
   const inline_keyboard = [];
   let row = [];
-  for (const a of STARSHIP_ACTIONS) {
+  for (const a of actions) {
+    // Prefer readable script label; keep key prefix for muscle memory
     row.push({
       text: `${a.key}:${a.label}`.slice(0, 64),
       callback_data: `ss:${a.id}`,
@@ -289,9 +296,9 @@ function opsKeyboard() {
 
 function userHelp() {
   return (
-    `TPlus — sparse Starship flight alerts\n\n` +
-    `/missions — list flights\n` +
-    `/mission <n> — browse nominal T+\n` +
+    `TPlus — sparse SpaceX launch alerts\n\n` +
+    `/missions — list missions\n` +
+    `/mission <n|id> — browse nominal T+\n` +
     `/eta — countdown to NET\n` +
     `/status — flight clock\n` +
     `/help — this message\n\n` +
@@ -303,7 +310,7 @@ function opsHelp() {
   return (
     userHelp() +
     `\n\nOps (admin)\n` +
-    `/ops — milestone buttons\n` +
+    `/ops — mission milestones + hold/go/anomaly\n` +
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/hype <hours>\n` +
@@ -453,7 +460,7 @@ async function handleMessage(env, kv, message) {
   if (text.startsWith("/status")) {
     const st = session.status();
     const lines = [
-      st.missionName || "Starship",
+      st.missionName || "TPlus",
       st.tPlusLabel,
       `phase: ${st.phase}`,
       `last: ${st.lastActionId || "—"}`,
@@ -469,9 +476,13 @@ async function handleMessage(env, kv, message) {
       return;
     }
     const st = session.status();
-    await reply(env, chatId, `Ops — ${st.missionName || "Starship"}`, {
-      reply_markup: opsKeyboard(),
-    });
+    const n = opsActionsForScript(session.scriptDoc?.script || []).length;
+    await reply(
+      env,
+      chatId,
+      `Ops — ${st.missionName || "mission"} (${n} buttons · script + hold/go/anomaly)`,
+      { reply_markup: opsKeyboard(session) },
+    );
     return;
   }
 

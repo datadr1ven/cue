@@ -12,10 +12,13 @@ export function createStarshipDomain() {
 }
 
 export {
-  STARSHIP_ACTIONS,
+  LAUNCH_ACTIONS,
+  STARSHIP_ACTIONS, // deprecated alias of LAUNCH_ACTIONS
+  OPS_ALWAYS_ON_IDS,
   actionByKey,
   actionById,
   formatHelp,
   formatTPlus,
+  opsActionsForScript,
 } from "./actions.js";
 export { tPlusSec } from "./snapshot.js";

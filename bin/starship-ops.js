@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Starship HITL CLI — watch webcast, press keys.
+ * TPlus HITL CLI — watch webcast, press keys for active mission.
  *
  *   npm run starship:ops
  *   npm run starship:ops -- --mission 12
+ *   npm run starship:ops -- --mission starlink-sl-17-50
  *   npm run starship:ops -- --script path/to/file.json
  *
- * Keys: ? help · 0 liftoff · n then type note · q quit
+ * Keys: ? help (mission-scoped) · 0 liftoff · n note · q quit
  */
 
 import { resolve, dirname, join } from "path";
@@ -49,12 +50,11 @@ async function main() {
   });
 
   const st0 = session.status();
-  console.log(`TPlus ops — ${st0.missionName || "Starship"}`);
+  console.log(`TPlus ops — ${st0.missionName || "mission"}`);
   if (st0.path) console.log(`Script: ${st0.path}`);
   console.log(st0.etaText);
-  console.log(formatHelp());
-  console.log("  n  freeform note (then type line + Enter)");
-  console.log("  m  list missions");
+  // Mission-scoped keys (same set as Telegram /ops)
+  console.log(formatHelp(session.scriptDoc?.script || []));
   console.log("Watch the video; press a key when the event happens.\n");
 
   if (!process.stdin.isTTY) {
@@ -108,7 +108,7 @@ async function main() {
       process.exit(0);
     }
     if (ch === "?" || ch === "/") {
-      console.log(formatHelp());
+      console.log(formatHelp(session.scriptDoc?.script || []));
       return;
     }
     if (ch === "t" || ch === "T") {

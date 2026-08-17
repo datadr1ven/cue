@@ -1,5 +1,5 @@
 /**
- * Starship session snapshot.
+ * Launch session snapshot (Starship / Falcon / …).
  */
 
 export function createStarshipState() {

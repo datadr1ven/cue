@@ -1,7 +1,9 @@
 # TPlus on Cloudflare Workers (free tier)
 
-Event-driven Telegram bot: **webhook → Worker → Cue starship domain → sendMessage**.  
-Subscribers and session state live in **KV**. Flight timelines ship in the deploy bundle (git).
+Event-driven Telegram bot for **sparse SpaceX launch alerts**:  
+**webhook → Worker → Cue launch domain → sendMessage**.
+
+Subscribers and session state live in **KV**. Mission timelines (Starship, Falcon/Starlink, …) ship in the deploy bundle (git).
 
 ## Why this stack
 
@@ -10,7 +12,8 @@ Subscribers and session state live in **KV**. Flight timelines ship in the deplo
 | Always on (free) | Workers free tier + webhook (no polling process) |
 | Subscribers | KV key `users:v1` (not local `data/users.json`) |
 | Active mission / T+ clock | KV key `session:v1` |
-| New flight timelines | Commit JSON → `npm run validate:missions` → deploy |
+| Free-text from users | KV key `inbox:v1` (admin `/inbox` / `/reply`) |
+| New mission timelines | Commit JSON → `npm run validate:missions` → deploy |
 
 Not for OpenF1 MQTT (use a small VPS for GridWhisper/F1 if needed).
 
@@ -90,14 +93,19 @@ Stop any local `npm run starship:bot` (polling conflicts with webhook).
 4. Everyone receives fan-out alerts.  
 5. User-facing **/** menu is registered via `setMyCommands` on the first webhook (ops commands stay hidden).
 
-## New flight (e.g. 14)
+## New mission (Starship, Starlink, …)
 
-1. Add `missions/flights/starship-flight-14-script.json`.  
-2. Register in `missions/index.json`.  
+Same path for every vehicle — data-driven `/ops` from the script:
+
+1. Add `missions/flights/<id>-script.json` (NET + ordered `script[]` milestones).  
+2. Register in `missions/index.json` (optional `number` for `/mission use <n>`).  
 3. **Import the new JSON in** `src/missions/bundle.js` (Workers cannot read the filesystem).  
-4. `npm run validate:missions && npm run smoke:tplus`  
-5. `npx wrangler deploy`  
-6. `/mission use 14` as admin  
+4. Use `actionId`s from the `LAUNCH_ACTIONS` catalog (`src/engine/domains/starship/actions.js`). Add a catalog row only if you need a *new* kind of milestone.  
+5. `npm run validate:missions && npm run smoke:tplus`  
+6. `npx wrangler deploy`  
+7. `/mission use <n|id>` as admin (or set `defaultMissionId`)  
+
+`/ops` shows: always-on `hold` / `go` / `los` / `anomaly` / `success`, then that mission’s script in order.
 
 ## Migrate existing `data/users.json`
 

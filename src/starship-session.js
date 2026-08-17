@@ -1,6 +1,6 @@
 /**
- * Starship HITL session (runtime-agnostic).
- * Requires opts.loader — on Node use createNodeStarshipSession from starship-session-node.js
+ * Launch HITL session (runtime-agnostic) — Starship, Falcon, Starlink, …
+ * Requires opts.loader — on Node use createStarshipSession from starship-session-node.js
  */
 
 import { createPipeline } from "./engine/pipeline.js";
@@ -96,7 +96,7 @@ export function createStarshipSession(opts = {}) {
     const scriptT = tPlusByAction.has(actionId)
       ? tPlusByAction.get(actionId)
       : action.scriptTPlusSec;
-    // Prefer mission script wording (Falcon vs Starship) when present
+    // Prefer mission script wording when present
     const scriptRow = Array.isArray(scriptDoc?.script)
       ? scriptDoc.script.find((r) => r.actionId === actionId)
       : null;

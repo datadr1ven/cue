@@ -184,7 +184,7 @@ export function validateMissionDoc(doc, path, errors = [], warnings = []) {
     ids.add(row.actionId);
     if (actionById(row.actionId) == null && row.actionId !== "note") {
       warnings.push(
-        `${p}: script actionId "${row.actionId}" not in STARSHIP_ACTIONS (still ok for display)`,
+        `${p}: script actionId "${row.actionId}" not in LAUNCH_ACTIONS catalog (display-only; /ops cannot fire it)`,
       );
     }
     if (row.tPlusSec == null || !Number.isFinite(Number(row.tPlusSec))) {

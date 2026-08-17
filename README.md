@@ -117,9 +117,9 @@ npm run bot
 
 Allowlisted users: `/start` appends to `data/users.json`. The worker fans out alerts to that list. Enrollment is separate from domain logic.
 
-### Manual inject (Starship / TPlus)
+### Manual inject (TPlus — SpaceX launches)
 
-For streams without a public event bus, operators mark moments while watching an external source. Flight timelines live under `missions/` (git). All allowlisted subscribers share one notification stream.
+For streams without a public event bus, operators mark moments while watching an external source. Mission timelines (Starship, Falcon/Starlink, …) live under `missions/` (git). `/ops` is **mission-scoped** (script milestones + hold/go/anomaly). All subscribers share one notification stream.
 
 ```bash
 # Before committing a new flight JSON
@@ -137,14 +137,15 @@ TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id DELIVERY_MODE=telegram npm run sta
 
 | Command | Role |
 |---------|------|
-| `/missions` · `/mission <n>` | Archive browse |
-| `/mission use <n>` | Active flight (ops + ETA) |
+| `/missions` · `/mission <n\|id>` | Archive browse |
+| `/mission use <n\|id>` | Active mission (ops + ETA) |
 | `/eta` · `/status` | NET countdown · live T+ |
-| `/ops` | Milestone buttons |
+| `/ops` | Mission-scoped milestones + hold/go/anomaly |
 | `/note <text>` | Freeform alert (all subscribers) |
 | `/broadcast <text>` | Announcement |
 | photo + caption `/note …` or `/broadcast …` | Same as above, with image (admin) |
 | `/hype <hours>` | HITL lead-up template (e.g. 48) |
+| `/inbox` · `/reply …` | Admin: free-text inbox + DM reply |
 
 The Telegram **/** menu lists user commands only (`start`, `help`, `missions`, `mission`, `eta`, `status`). Ops commands stay off the public menu.
 
@@ -235,7 +236,7 @@ Evaluation notes and capture inventories may live under `gold/` for development;
 
 ## TPlus on Cloudflare (free tier)
 
-Persistent hosting for the Starship Telegram bot: **webhook Worker + KV**.
+Persistent hosting for the TPlus launch Telegram bot: **webhook Worker + KV**.
 
 See **[docs/tplus-cloudflare.md](./docs/tplus-cloudflare.md)** for deploy, webhook setup, mission updates, and **git-push autodeploy**.
 

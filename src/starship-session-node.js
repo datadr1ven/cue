@@ -1,5 +1,5 @@
 /**
- * Node entry: Starship session with filesystem mission registry.
+ * Node entry: launch session with filesystem mission registry.
  */
 
 import { createStarshipSession as createCore } from "./starship-session.js";
