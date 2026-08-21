@@ -20,7 +20,10 @@ import {
   isPositionMapSane,
 } from "./snapshot.js";
 
-const SESSION_BEST_COOLDOWN_MS = 20_000;
+/** Min gap between session-best alerts (event time). */
+const SESSION_BEST_COOLDOWN_MS = 45_000;
+/** Same driver must beat their previous best by at least this much to re-alert. */
+const SESSION_BEST_MIN_IMPROVE_SEC = 0.05;
 /** Race/sprint: top-5 board if quiet this long (event time). */
 export const ORDER_PULSE_MS = 12 * 60 * 1000;
 
@@ -488,6 +491,19 @@ function fromLap(prev, next, p, t) {
   const best = next.sessionBest;
   if (prev.sessionBest && prev.sessionBest.timeSec === best.timeSec) return [];
 
+  // Same driver shaving hundredths (common in Q/SQ) — not worth a Telegram ping
+  if (
+    prev.sessionBest &&
+    best.prevDriver != null &&
+    Number(best.driver) === Number(best.prevDriver) &&
+    best.prevTimeSec != null &&
+    Number.isFinite(Number(best.timeSec)) &&
+    Number.isFinite(Number(best.prevTimeSec))
+  ) {
+    const gain = Number(best.prevTimeSec) - Number(best.timeSec);
+    if (gain < SESSION_BEST_MIN_IMPROVE_SEC) return [];
+  }
+
   const tMs = toMs(best.improvedAt || t) || 0;
   const prevAt = toMs(prev.sessionBest?.improvedAt);
   if (
@@ -729,10 +745,18 @@ export function knockoutAdvanceCount(endedSegment, fieldSize) {
 
 function buildCutMoment(state, order, endedSegment, t) {
   // Prefer live freeze (includes post-chequered improvements) over stale snapshot
-  const field =
+  let field =
     (state.orderAtChequered && state.orderAtChequered.length
       ? state.orderAtChequered
       : order) || [];
+  // Q2/SQ2+: position map still lists cars already out — restrict to who
+  // advanced into this segment (Dutch SQ gold: otherwise "out (12)" not 6).
+  if (endedSegment >= 2 && field.length > 10) {
+    const entered = knockoutAdvanceCount(endedSegment - 1, field.length);
+    if (entered > 0 && entered < field.length) {
+      field = field.slice(0, entered);
+    }
+  }
   const advanceN = knockoutAdvanceCount(endedSegment, field.length);
   const through = enrichOrder(state, field.slice(0, advanceN));
   const outList = enrichOrder(state, field.slice(advanceN));

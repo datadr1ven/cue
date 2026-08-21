@@ -33,6 +33,8 @@ let shuttingDown = false;
 let signalsHooked = false;
 /** Flush deferred pit→tyre combines */
 let pitFlushTimer = null;
+/** One-time worker init (pipeline / bot / signals) — preserved across MQTT reconnects */
+let workerInitialized = false;
 
 const maxReconnectAttemptsBeforeSlow = 10;
 const baseReconnectDelay = 1000;
@@ -75,7 +77,8 @@ function scheduleReconnect() {
   logInfo(`🔄 Reconnect in ${delay}ms (attempt ${reconnectAttempts})`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    startMqttWorker().catch((e) => {
+    // Reconnect MQTT only — keep pipeline state (segment, meeting, session best)
+    connectMqttClient().catch((e) => {
       logError("Reconnect failed:", e.message);
       scheduleReconnect();
     });
@@ -229,57 +232,34 @@ function ensurePitFlushTimer() {
   if (typeof pitFlushTimer.unref === "function") pitFlushTimer.unref();
 }
 
-export async function startMqttWorker() {
-  runtime = getRuntime();
-  logRuntimeBanner(runtime);
-
-  if (runtime.deliveryMode === "telegram") {
-    requireTelegramToken();
-    bot = new Telegraf(config.telegramToken);
-  }
-
-  if (runtime.mqttSource === "live") {
-    if (!config.openf1Username && !process.env.OPENF1_USERNAME) {
-      throw new Error("OPENF1_USERNAME required for live");
-    }
-    if (!config.openf1Password && !process.env.OPENF1_PASSWORD) {
-      throw new Error("OPENF1_PASSWORD required for live");
-    }
-  }
-
-  if (runtime.deliveryMode === "http") {
-    logInfo("👥 Subscribers: managed by CF Worker KV (POST /deliver)");
-    usersCache = new Map();
-  } else if (runtime.deliveryMode === "telegram") {
-    usersCache = loadSubscribers();
-    logInfo(`👥 Subscribers: ${usersCache.size} (local file)`);
-  } else {
-    usersCache = new Map();
-    logInfo(`👥 Subscribers: n/a (DELIVERY_MODE=${runtime.deliveryMode})`);
-  }
-
-  pipeline = createPipeline({
-    domain: config.engineDomain,
-    source: "mqtt",
-    useLlm: false,
-    usePrefs: false,
-    minSeverity: config.minSeverity,
-  });
-  logInfo(
-    `🧠 Pipeline domain=${pipeline.domainName} minSeverity=${pipeline.config.minSeverity}`,
-  );
+/**
+ * Tear down any half-open client and connect (or reconnect) to MQTT.
+ * Does not recreate the Cue pipeline — session state survives hiccups.
+ */
+async function connectMqttClient() {
+  if (shuttingDown) return;
 
   intentionalDisconnect = false;
   clearReconnectTimer();
+
+  if (client) {
+    try {
+      client.removeAllListeners();
+      intentionalDisconnect = true; // suppress close→reconnect while swapping
+      client.end(true);
+    } catch {
+      /* ignore */
+    }
+    client = null;
+    intentionalDisconnect = false;
+  }
 
   if (runtime.mqttSource === "live") {
     globalToken = await fetchToken();
   }
 
   const options = getMqttOptions(runtime, globalToken);
-  logInfo(
-    `🚀 MQTT ${options.protocol}://${options.host}:${options.port}`,
-  );
+  logInfo(`🚀 MQTT ${options.protocol}://${options.host}:${options.port}`);
   client = mqtt.connect(options);
 
   client.on("connect", () => {
@@ -308,14 +288,60 @@ export async function startMqttWorker() {
   client.on("error", (err) => logError("MQTT error:", err.message));
   client.on("close", () => {
     isConnected = false;
-    if (!intentionalDisconnect) {
+    if (!intentionalDisconnect && !shuttingDown) {
       logWarn("MQTT closed");
       scheduleReconnect();
     }
   });
+}
 
-  hookLifecycleSignals();
-  ensurePitFlushTimer();
+export async function startMqttWorker() {
+  if (!workerInitialized) {
+    runtime = getRuntime();
+    logRuntimeBanner(runtime);
+
+    if (runtime.deliveryMode === "telegram") {
+      requireTelegramToken();
+      bot = new Telegraf(config.telegramToken);
+    }
+
+    if (runtime.mqttSource === "live") {
+      if (!config.openf1Username && !process.env.OPENF1_USERNAME) {
+        throw new Error("OPENF1_USERNAME required for live");
+      }
+      if (!config.openf1Password && !process.env.OPENF1_PASSWORD) {
+        throw new Error("OPENF1_PASSWORD required for live");
+      }
+    }
+
+    if (runtime.deliveryMode === "http") {
+      logInfo("👥 Subscribers: managed by CF Worker KV (POST /deliver)");
+      usersCache = new Map();
+    } else if (runtime.deliveryMode === "telegram") {
+      usersCache = loadSubscribers();
+      logInfo(`👥 Subscribers: ${usersCache.size} (local file)`);
+    } else {
+      usersCache = new Map();
+      logInfo(`👥 Subscribers: n/a (DELIVERY_MODE=${runtime.deliveryMode})`);
+    }
+
+    pipeline = createPipeline({
+      domain: config.engineDomain,
+      source: "mqtt",
+      useLlm: false,
+      usePrefs: false,
+      minSeverity: config.minSeverity,
+    });
+    logInfo(
+      `🧠 Pipeline domain=${pipeline.domainName} minSeverity=${pipeline.config.minSeverity}`,
+    );
+
+    hookLifecycleSignals();
+    ensurePitFlushTimer();
+    workerInitialized = true;
+  }
+
+  await connectMqttClient();
 }
 
 /**

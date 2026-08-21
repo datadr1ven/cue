@@ -272,9 +272,10 @@ function formatLeader(d) {
   return "";
 }
 
-function shortMsg(msg) {
+function shortMsg(msg, maxLen = 300) {
   const s = String(msg || "").replace(/\s+/g, " ").trim();
-  return s.length > 160 ? s.slice(0, 157) + "…" : s;
+  const cap = Math.max(40, Number(maxLen) || 300);
+  return s.length > cap ? s.slice(0, cap - 1) + "…" : s;
 }
 
 function formatLapTime(sec) {
