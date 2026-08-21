@@ -11,21 +11,10 @@ import { deliver, deliverHttp, applyAlertTag } from "./delivery.js";
 import { loadSubscribers } from "./users.js";
 import { createPipeline } from "./engine/pipeline.js";
 import { expandOpenF1Line } from "./engine/ingest/openf1.js";
+import { logInfo, logWarn, logError } from "./log.js";
+import { MQTT_TOPICS } from "./mqtt-topics.js";
 
-export const MQTT_TOPICS = [
-  "v1/drivers",
-  "v1/position",
-  "v1/pit",
-  "v1/stints",
-  "v1/race_control",
-  "v1/weather",
-  "v1/team_radio",
-  "v1/session_result",
-  "v1/starting_grid",
-  "v1/sessions",
-  "v1/meetings", // event / circuit name when feed provides it
-  "v1/laps", // quali session-best
-];
+export { MQTT_TOPICS };
 
 let client = null;
 let isConnected = false;
@@ -60,7 +49,7 @@ async function fetchToken() {
     new URLSearchParams({ username, password }),
     { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
   );
-  console.log("✅ OpenF1 token ok");
+  logInfo("✅ OpenF1 token ok");
   return res.data.access_token;
 }
 
@@ -81,13 +70,13 @@ function scheduleReconnect() {
   );
   const delay = Math.floor(exp * (0.8 + Math.random() * 0.4));
   if (reconnectAttempts === maxReconnectAttemptsBeforeSlow) {
-    console.warn(`⚠️ Many reconnects — cap ${maxReconnectDelay}ms`);
+    logWarn(`⚠️ Many reconnects — cap ${maxReconnectDelay}ms`);
   }
-  console.log(`🔄 Reconnect in ${delay}ms (attempt ${reconnectAttempts})`);
+  logInfo(`🔄 Reconnect in ${delay}ms (attempt ${reconnectAttempts})`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     startMqttWorker().catch((e) => {
-      console.error("Reconnect failed:", e.message);
+      logError("Reconnect failed:", e.message);
       scheduleReconnect();
     });
   }, delay);
@@ -101,11 +90,11 @@ async function fanOut(alert) {
   if (runtime.deliveryMode === "http") {
     const r = await deliverHttp(text);
     if (r.ok) {
-      console.log(
+      logInfo(
         `[deliver:http] → ${r.delivered ?? "?"}/${r.total ?? "?"} subscribers`,
       );
     } else {
-      console.error(`[deliver:http] failed: ${r.reason} ${r.error || ""}`);
+      logError(`[deliver:http] failed: ${r.reason} ${r.error || ""}`);
     }
     return;
   }
@@ -117,7 +106,7 @@ async function fanOut(alert) {
 
   const users = [...usersCache.values()];
   if (users.length === 0) {
-    console.log(`[no-subscribers] ${text.replace(/\n/g, " | ")}`);
+    logInfo(`[no-subscribers] ${text.replace(/\n/g, " | ")}`);
     return;
   }
   for (const user of users) {
@@ -158,11 +147,11 @@ function lifecycleBannerText(kind) {
 async function announceLifecycle(kind) {
   if (!lifecycleBannersEnabled()) return;
   const text = lifecycleBannerText(kind);
-  console.log(`[lifecycle] ${text.replace(/\n/g, " | ")}`);
+  logInfo(`[lifecycle] ${text.replace(/\n/g, " | ")}`);
   try {
     await fanOut({ text });
   } catch (e) {
-    console.error(`[lifecycle] ${kind} banner failed:`, e.message || e);
+    logError(`[lifecycle] ${kind} banner failed:`, e.message || e);
   }
 }
 
@@ -173,7 +162,7 @@ function hookLifecycleSignals() {
     stopMqttWorker(sig)
       .then(() => process.exit(0))
       .catch((e) => {
-        console.error("Shutdown error:", e.message || e);
+        logError("Shutdown error:", e.message || e);
         process.exit(1);
       });
   };
@@ -212,11 +201,11 @@ async function onMessage(topic, buf) {
 }
 
 async function emitAlert(alert) {
-  const ts = alert.moment.t
+  const eventTs = alert.moment.t
     ? String(alert.moment.t).slice(11, 19)
-    : new Date().toISOString().slice(11, 19);
-  console.log(
-    `⚡ ${ts} [${alert.moment.severity}] ${alert.moment.type} ${alert.text.replace(/\n/g, " | ")}`,
+    : "??:??:??";
+  logInfo(
+    `⚡ ${eventTs} [${alert.moment.severity}] ${alert.moment.type} ${alert.text.replace(/\n/g, " | ")}`,
   );
   await fanOut(alert);
 }
@@ -235,7 +224,7 @@ function ensurePitFlushTimer() {
   pitFlushTimer = setInterval(() => {
     messageQueue = messageQueue
       .then(() => flushPendingPits())
-      .catch((e) => console.error("Pit flush error:", e));
+      .catch((e) => logError("Pit flush error:", e));
   }, 500);
   if (typeof pitFlushTimer.unref === "function") pitFlushTimer.unref();
 }
@@ -259,14 +248,14 @@ export async function startMqttWorker() {
   }
 
   if (runtime.deliveryMode === "http") {
-    console.log("👥 Subscribers: managed by CF Worker KV (POST /deliver)");
+    logInfo("👥 Subscribers: managed by CF Worker KV (POST /deliver)");
     usersCache = new Map();
   } else if (runtime.deliveryMode === "telegram") {
     usersCache = loadSubscribers();
-    console.log(`👥 Subscribers: ${usersCache.size} (local file)`);
+    logInfo(`👥 Subscribers: ${usersCache.size} (local file)`);
   } else {
     usersCache = new Map();
-    console.log(`👥 Subscribers: n/a (DELIVERY_MODE=${runtime.deliveryMode})`);
+    logInfo(`👥 Subscribers: n/a (DELIVERY_MODE=${runtime.deliveryMode})`);
   }
 
   pipeline = createPipeline({
@@ -276,7 +265,7 @@ export async function startMqttWorker() {
     usePrefs: false,
     minSeverity: config.minSeverity,
   });
-  console.log(
+  logInfo(
     `🧠 Pipeline domain=${pipeline.domainName} minSeverity=${pipeline.config.minSeverity}`,
   );
 
@@ -288,24 +277,24 @@ export async function startMqttWorker() {
   }
 
   const options = getMqttOptions(runtime, globalToken);
-  console.log(
+  logInfo(
     `🚀 MQTT ${options.protocol}://${options.host}:${options.port}`,
   );
   client = mqtt.connect(options);
 
   client.on("connect", () => {
-    console.log("✅ MQTT connected");
+    logInfo("✅ MQTT connected");
     isConnected = true;
     reconnectAttempts = 0;
     client.subscribe(MQTT_TOPICS, { qos: 1 }, (err) => {
-      if (err) console.error("Subscribe error:", err);
-      else console.log("✅ Subscribed:", MQTT_TOPICS.join(", "));
+      if (err) logError("Subscribe error:", err);
+      else logInfo("✅ Subscribed:", MQTT_TOPICS.join(", "));
       // One online banner per process (not on every MQTT reconnect)
       if (!startupBannerSent && !shuttingDown) {
         startupBannerSent = true;
         messageQueue = messageQueue
           .then(() => announceLifecycle("up"))
-          .catch((e) => console.error("Startup banner error:", e));
+          .catch((e) => logError("Startup banner error:", e));
       }
     });
   });
@@ -313,14 +302,14 @@ export async function startMqttWorker() {
   client.on("message", (topic, message) => {
     messageQueue = messageQueue
       .then(() => onMessage(topic, message))
-      .catch((e) => console.error("Handler error:", e));
+      .catch((e) => logError("Handler error:", e));
   });
 
-  client.on("error", (err) => console.error("MQTT error:", err.message));
+  client.on("error", (err) => logError("MQTT error:", err.message));
   client.on("close", () => {
     isConnected = false;
     if (!intentionalDisconnect) {
-      console.warn("MQTT closed");
+      logWarn("MQTT closed");
       scheduleReconnect();
     }
   });
@@ -343,7 +332,7 @@ export async function stopMqttWorker(reason = "shutdown") {
     clearInterval(pitFlushTimer);
     pitFlushTimer = null;
   }
-  console.log(`🛑 Stopping MQTT worker (${reason})…`);
+  logInfo(`🛑 Stopping MQTT worker (${reason})…`);
 
   // Drain in-flight message handling, flush deferred pits, then announce offline
   try {

@@ -2,6 +2,7 @@ node_modules/
 .env
 data/users.json
 *.log
+captures/
 .DS_Store
 .idea/
 .vscode/

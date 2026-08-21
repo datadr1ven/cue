@@ -36,6 +36,8 @@
     "worker:live:http": "MQTT_SOURCE=live DELIVERY_MODE=http node bin/worker.js",
     "worker:local:log": "MQTT_SOURCE=local DELIVERY_MODE=log node bin/worker.js",
     "worker:local:http": "MQTT_SOURCE=local DELIVERY_MODE=http node bin/worker.js",
+    "capture": "MQTT_SOURCE=live node bin/capture.js",
+    "capture:local": "MQTT_SOURCE=local node bin/capture.js",
     "bot": "node bin/bot.js",
     "publish": "node bin/publish-ndjson.js",
     "starship:ops": "node bin/starship-ops.js",

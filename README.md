@@ -83,19 +83,34 @@ See [`examples/f1/`](./examples/f1/) for the GridWhisper-oriented fixture (not a
 
 ### MQTT worker (stream → deliver)
 
-Requires `MQTT_SOURCE` and `DELIVERY_MODE`.
+Requires `MQTT_SOURCE` and `DELIVERY_MODE`. Ops logs are prefixed with **wall-clock UTC** (reconnect timing); alert lines still show **event-time** after `⚡`.
 
 | Command | MQTT | Delivery |
 |---------|------|----------|
 | `npm run worker:local:log` | local broker | log |
 | `npm run worker:live:log` | configured live host | log |
 | `npm run worker:live` | configured live host | Telegram |
+| `npm run worker:live:http` | live | CF Worker `/deliver` |
 
 ```bash
 MQTT_SOURCE=local DELIVERY_MODE=log npm run worker
 ```
 
 Default domain is `f1` (`ENGINE_DOMAIN`). Lean topic subscriptions are defined in the MQTT worker for that domain.
+
+### Capture NDJSON (reconnect-safe)
+
+For gold / postmortems. Appends to one file across broker hiccups; 5‑minute heartbeats.
+
+```bash
+# Prefer an explicit path (tmux recommended for race weekends)
+npm run capture -- dutch-2026/sq.ndjson
+
+# Or:
+CAPTURE_OUT=dutch-2026/fp2.ndjson npm run capture
+```
+
+Uses the same OpenF1 live credentials as the worker (`OPENF1_USERNAME` / `OPENF1_PASSWORD`). Ctrl+C flushes and exits.
 
 ### Publish NDJSON to a local broker
 

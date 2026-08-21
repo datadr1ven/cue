@@ -3,6 +3,7 @@
  */
 
 import { config } from "./config.js";
+import { logInfo } from "./log.js";
 
 const MQTT_SOURCES = ["live", "local"];
 /** telegram = local Telegraf fan-out; http = POST to CF Worker /deliver */
@@ -98,7 +99,7 @@ export function logRuntimeBanner(runtime) {
   } else if (runtime.mqttSource === "local") {
     tagNote = " tag=🧪 REPLAY (auto for local MQTT; ALERT_TAG=off to disable)";
   }
-  console.log(
+  logInfo(
     `Cue worker: MQTT=${runtime.mqttSource} DELIVERY=${runtime.deliveryMode}${allow}${http}${tagNote}`,
   );
 }
