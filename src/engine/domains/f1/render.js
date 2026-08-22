@@ -80,11 +80,43 @@ export function renderF1Moment(moment, state) {
         d.top3?.length > 0
           ? d.top3.map((x) => `P${x.pos} ${x.name}`).join(" · ")
           : d.poleName || "";
-      const title = d.sprintShootout
-        ? `🥇 Sprint pole: ${d.poleName || "—"}`
-        : `🥇 Pole: ${d.poleName || "—"}`;
-      return withHead(head, `${title}${top ? `\n${top}` : ""}`);
+      const kind = d.sprintShootout ? "Sprint pole" : "Pole";
+      const title = d.provisional
+        ? `🥇 Provisional ${kind.toLowerCase()}: ${d.poleName || "—"}`
+        : `🥇 ${kind}: ${d.poleName || "—"}`;
+      const note = d.provisional
+        ? "\n(cars already on a lap can still improve)"
+        : "";
+      return withHead(head, `${title}${top ? `\n${top}` : ""}${note}`);
     }
+
+    case "quali.pole_change": {
+      const was = d.prevPoleName ? ` (was ${d.prevPoleName})` : "";
+      const kind = d.sprintShootout ? "sprint pole" : "pole";
+      const top =
+        d.top3?.length > 0
+          ? "\n" + d.top3.map((x) => `P${x.pos} ${x.name}`).join(" · ")
+          : "";
+      return withHead(
+        head,
+        `🥇 Provisional ${kind}: ${d.poleName || "—"}${was}${top}\n(cars already on a lap can still improve)`,
+      );
+    }
+
+    case "quali.into_cut":
+      return withHead(
+        head,
+        `📈 ${d.driverName || "Driver"} into the ${d.label || "Q"} cut · P${d.fromPos}→P${d.toPos}`,
+      );
+
+    case "weather.rain_risk":
+      return withHead(
+        head,
+        `🌧️ ${String(d.message || "Rain risk").replace(/\s+/g, " ").trim()}`,
+      );
+
+    case "weather.rain":
+      return withHead(head, "🌧️ Rain detected at the circuit");
 
     case "session.finished":
       return withHead(head, raceFinishLine("Session finished", d));

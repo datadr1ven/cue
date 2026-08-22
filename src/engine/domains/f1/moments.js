@@ -24,6 +24,8 @@ import {
 const SESSION_BEST_COOLDOWN_MS = 45_000;
 /** Same driver must beat their previous best by at least this much to re-alert. */
 const SESSION_BEST_MIN_IMPROVE_SEC = 0.05;
+/** Ignore "fastest lap" noise in the opening minutes of a Q/SQ segment. */
+const SESSION_BEST_WARMUP_MS = 3 * 60 * 1000;
 /** Race/sprint: top-5 board if quiet this long (event time). */
 export const ORDER_PULSE_MS = 12 * 60 * 1000;
 
@@ -91,9 +93,23 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromLap(prev, next, p, t));
   }
 
+  if (event.type === "f1.weather") {
+    moments.push(...fromWeather(prev, next, p, t));
+  }
+
   // Practice: no order / pits / radio noise
   if (event.type === "f1.position" && isRaceStyleMode(next) && !isPracticeMode(next)) {
     moments.push(...fromPosition(prev, next, p, t));
+  }
+
+  // Knockout: post-chequered board drama (into the cut / provisional pole flips)
+  if (
+    event.type === "f1.position" &&
+    (isKnockoutMode(next) || isQualifyingMode(next)) &&
+    next.chequered
+  ) {
+    moments.push(...maybeIntoCut(prev, next, p, t));
+    moments.push(...maybeProvisionalPoleChange(prev, next, t));
   }
 
   // Pits are deferred in reduce (pendingPits) until stint compound arrives
@@ -184,6 +200,22 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
           ...(next.lastBigSwingByDriver || {}),
           [m.data.driver]: t || next.lastBigSwingByDriver?.[m.data.driver],
         },
+      };
+    }
+    if (m.type === "quali.pole" || m.type === "quali.pole_change") {
+      const poleDrv =
+        m.data?.pole?.driver ?? m.data?.driver ?? next.provisionalPoleDriver;
+      next = {
+        ...next,
+        poleEmitted: true,
+        provisionalPoleDriver:
+          poleDrv != null ? Number(poleDrv) : next.provisionalPoleDriver,
+      };
+    }
+    if (m.type === "weather.rain") {
+      next = {
+        ...next,
+        lastWeatherRainAlertT: t || next.lastWeatherRainAlertT,
       };
     }
   }
@@ -355,6 +387,22 @@ function fromRaceControl(prev, next, p, t) {
     });
   }
 
+  // Rain risk / wet notes — allowed even before session start
+  if (
+    /\bRISK OF RAIN\b|\bRAIN FALLING\b|\bWET TRACK\b|\bRAIN IS\b/.test(up)
+  ) {
+    out.push({
+      id: `weather-rc-${t}-${msg.slice(0, 32)}`,
+      type: "weather.rain_risk",
+      severity: 7,
+      t,
+      data: {
+        message: msg,
+        ...contextFields(next, phaseLabel(next)),
+      },
+    });
+  }
+
   if (flag.includes("CHEQUERED") || up.includes("CHEQUERED FLAG")) {
     const seg = next.endedSegment || next.segment || 1;
     const order = next.orderAtChequered || orderedField(next, 30);
@@ -393,7 +441,10 @@ function fromRaceControl(prev, next, p, t) {
     ) {
       const label = segmentLabel(seg, kind);
       if (seg >= 3) {
-        out.push(...buildPoleMoment(next, order, t));
+        // First Q3/SQ3 chequered → provisional pole; ignore feed re-broadcasts
+        if (!prev.poleEmitted && !next.poleEmitted) {
+          out.push(...buildPoleMoment(next, order, t, { provisional: true }));
+        }
       } else if (seg <= 2 && !next.awaitingNextSegment) {
         out.push(...buildCutMoment(next, order, seg, t));
       } else if (seg <= 2) {
@@ -452,31 +503,46 @@ function fromRaceControl(prev, next, p, t) {
     });
   }
 
-  // Penalties / investigations (high signal keywords)
+  // Penalties / investigations — squelch before first SESSION STARTED (pre-grid noise).
+  // Still allow between Q segments (chequered / awaiting next).
+  const sessionBegun = Boolean(
+    next.sessionActive ||
+      prev.sessionActive ||
+      next.chequered ||
+      prev.chequered ||
+      (next.chequeredCount || 0) > 0 ||
+      (prev.chequeredCount || 0) > 0 ||
+      (next.segment || 0) >= 1 ||
+      (prev.segment || 0) >= 1,
+  );
   if (
     /TIME PENALTY|STOP-AND-GO|STOP AND GO|DRIVE THROUGH|GRID DROP|DROP OF \d+/.test(
       up,
     )
   ) {
-    out.push({
-      id: `penalty-${t}-${msg.slice(0, 40)}`,
-      type: "penalty.time",
-      severity: 8,
-      t,
-      entities:
-        p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
-      data: { message: msg },
-    });
+    if (sessionBegun) {
+      out.push({
+        id: `penalty-${t}-${msg.slice(0, 40)}`,
+        type: "penalty.time",
+        severity: 8,
+        t,
+        entities:
+          p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
+        data: { message: msg },
+      });
+    }
   } else if (/UNDER INVESTIGATION|WILL BE INVESTIGATED/.test(up)) {
-    out.push({
-      id: `invest-${t}-${msg.slice(0, 40)}`,
-      type: "stewards.investigation",
-      severity: 7,
-      t,
-      entities:
-        p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
-      data: { message: msg },
-    });
+    if (sessionBegun) {
+      out.push({
+        id: `invest-${t}-${msg.slice(0, 40)}`,
+        type: "stewards.investigation",
+        severity: 7,
+        t,
+        entities:
+          p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
+        data: { message: msg },
+      });
+    }
   }
 
   return out;
@@ -491,6 +557,18 @@ function fromLap(prev, next, p, t) {
   const best = next.sessionBest;
   if (prev.sessionBest && prev.sessionBest.timeSec === best.timeSec) return [];
 
+  const tMs = toMs(best.improvedAt || t) || 0;
+
+  // Opening minutes of a segment: out-laps / installation times aren't interesting
+  const startMs = toMs(next.segmentStartT);
+  if (
+    startMs != null &&
+    tMs >= startMs &&
+    tMs - startMs < SESSION_BEST_WARMUP_MS
+  ) {
+    return [];
+  }
+
   // Same driver shaving hundredths (common in Q/SQ) — not worth a Telegram ping
   if (
     prev.sessionBest &&
@@ -504,7 +582,6 @@ function fromLap(prev, next, p, t) {
     if (gain < SESSION_BEST_MIN_IMPROVE_SEC) return [];
   }
 
-  const tMs = toMs(best.improvedAt || t) || 0;
   const prevAt = toMs(prev.sessionBest?.improvedAt);
   if (
     prev.sessionBest?._improved &&
@@ -785,16 +862,17 @@ function buildCutMoment(state, order, endedSegment, t) {
   ];
 }
 
-function buildPoleMoment(state, order, t) {
+function buildPoleMoment(state, order, t, opts = {}) {
   const top = enrichOrder(state, (order || []).slice(0, 10));
   const pole = top[0] || null;
   const finalLabel = segmentLabel(3, state.sessionKind);
   const isSprintShootout = state.sessionKind === "sprint_qualifying";
+  const provisional = Boolean(opts.provisional);
   return [
     {
-      id: `quali-pole-${t}`,
+      id: `quali-pole-${provisional ? "prov-" : ""}${t}`,
       type: "quali.pole",
-      severity: 9,
+      severity: provisional ? 8 : 9,
       t,
       entities: pole ? [pole.driver] : [],
       data: {
@@ -803,7 +881,146 @@ function buildPoleMoment(state, order, t) {
         top3: top.slice(0, 3),
         top10: top,
         sprintShootout: isSprintShootout,
+        provisional,
         ...contextFields(state, finalLabel),
+      },
+    },
+  ];
+}
+
+/**
+ * After Q1/Q2 chequered: car jumps from outside the cut into a transfer slot.
+ */
+function maybeIntoCut(prev, next, p, t) {
+  if (!next.awaitingNextSegment) return [];
+  const ended = next.endedSegment || next.segment || 1;
+  if (ended >= 3) return [];
+
+  const num = Number(p.driver_number);
+  const newPos = Number(p.position);
+  const oldPos = prev.position?.[num];
+  if (!Number.isFinite(num) || !Number.isFinite(newPos) || oldPos == null) {
+    return [];
+  }
+  const old = Number(oldPos);
+  if (!Number.isFinite(old)) return [];
+
+  let fieldSize = Object.keys(next.position || {}).length;
+  if (ended >= 2 && fieldSize > 10) {
+    const entered = knockoutAdvanceCount(ended - 1, fieldSize);
+    if (entered > 0) fieldSize = entered;
+  }
+  const advanceN = knockoutAdvanceCount(ended, fieldSize);
+  if (advanceN <= 0) return [];
+
+  // Was just outside the cut (bubble / near misses), now inside.
+  // Ignore wild board reshuffles (e.g. P20→P10) right after the flag.
+  if (!(old > advanceN && old <= advanceN + 3 && newPos <= advanceN)) {
+    return [];
+  }
+
+  const label = segmentLabel(ended, next.sessionKind);
+  return [
+    {
+      id: `into-cut-${num}-${old}-${newPos}-${t}`,
+      type: "quali.into_cut",
+      severity: 8,
+      t,
+      entities: [num],
+      data: {
+        driver: num,
+        driverName: driverLabel(next, num),
+        fromPos: old,
+        toPos: newPos,
+        cutLine: advanceN,
+        label,
+        ...contextFields(next, label),
+      },
+    },
+  ];
+}
+
+/**
+ * Late Q3/SQ3: P1 flips after chequered while cars finish flying laps.
+ */
+function maybeProvisionalPoleChange(prev, next, t) {
+  const ended = next.endedSegment || next.segment || 0;
+  if (ended < 3 && (next.segment || 0) < 3) return [];
+  if (!prev.poleEmitted && !next.poleEmitted) return [];
+
+  const order = next.orderAtChequered || orderedField(next, 10);
+  if (!order.length) return [];
+  const p1 = order[0];
+  const poleDrv = Number(p1.driver);
+  if (!Number.isFinite(poleDrv)) return [];
+
+  const prevPole =
+    next.provisionalPoleDriver != null
+      ? Number(next.provisionalPoleDriver)
+      : prev.provisionalPoleDriver != null
+        ? Number(prev.provisionalPoleDriver)
+        : null;
+  if (prevPole != null && prevPole === poleDrv) return [];
+
+  const top = enrichOrder(next, order.slice(0, 3));
+  const finalLabel = segmentLabel(3, next.sessionKind);
+  return [
+    {
+      id: `pole-change-${poleDrv}-${t}`,
+      type: "quali.pole_change",
+      severity: 8,
+      t,
+      entities: [poleDrv],
+      data: {
+        driver: poleDrv,
+        pole: top[0] || null,
+        poleName: top[0]?.name || driverLabel(next, poleDrv),
+        prevPoleDriver: prevPole,
+        prevPoleName:
+          prevPole != null ? driverLabel(next, prevPole) : null,
+        top3: top,
+        provisional: true,
+        sprintShootout: next.sessionKind === "sprint_qualifying",
+        ...contextFields(next, finalLabel),
+      },
+    },
+  ];
+}
+
+/** OpenF1 rainfall bit flaps — don't re-alert more often than this. */
+const WEATHER_RAIN_COOLDOWN_MS = 15 * 60 * 1000;
+
+function fromWeather(prev, next, p, t) {
+  const prevR = Number(prev.weather?.rainfall);
+  const nextR = Number(
+    next.weather?.rainfall != null ? next.weather.rainfall : p.rainfall,
+  );
+  const wasWet = Number.isFinite(prevR) && prevR > 0;
+  const nowWet = Number.isFinite(nextR) && nextR > 0;
+  if (wasWet || !nowWet) return [];
+
+  const tMs = toMs(t);
+  const lastMs = toMs(prev.lastWeatherRainAlertT || next.lastWeatherRainAlertT);
+  if (
+    lastMs != null &&
+    tMs != null &&
+    tMs - lastMs >= 0 &&
+    tMs - lastMs < WEATHER_RAIN_COOLDOWN_MS
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      id: `weather-rain-${t}`,
+      type: "weather.rain",
+      severity: 7,
+      t,
+      data: {
+        rainfall: nextR,
+        trackTemp: next.weather?.track_temperature ?? p.track_temperature,
+        airTemp: next.weather?.air_temperature ?? p.air_temperature,
+        ...contextFields(next, phaseLabel(next)),
       },
     },
   ];

@@ -92,8 +92,14 @@ export function createF1State() {
     _raceFinishEmit: null,
     /** Already sent race finish this session (avoid double chequered+finished) */
     raceFinishEmitted: false,
+    /** Q3/SQ3: already announced pole (ignore duplicate CHEQUERED from feed) */
+    poleEmitted: false,
+    /** driver_number currently shown as (provisional) pole */
+    provisionalPoleDriver: null,
     leader: null,
     weather: null,
+    /** Event-time of last weather.rain alert (cooldown flapping rainfall bit) */
+    lastWeatherRainAlertT: null,
     lastEventT: null,
     chequered: false,
     chequeredCount: 0,
@@ -228,6 +234,9 @@ export function reduceF1(state, event, opts = {}) {
     next.pendingRaceFinish = null;
     next._raceFinishEmit = null;
     next.raceFinishEmitted = false;
+    next.poleEmitted = false;
+    next.provisionalPoleDriver = null;
+    next.lastWeatherRainAlertT = null;
     next.leader = null;
     next.trackStatus = null;
     next.sessionActive = false;
@@ -944,6 +953,8 @@ function applyRaceControl(state, p, t) {
       state.radioEmitCount = 0;
       state.lastRadioEmitT = null;
       state.lastRadioInterestT = t || state.lastEventT;
+      state.poleEmitted = false;
+      state.provisionalPoleDriver = null;
     }
     return;
   }
