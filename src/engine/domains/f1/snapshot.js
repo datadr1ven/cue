@@ -111,7 +111,10 @@ export function createF1State() {
     endedSegment: null,
     /** Best complete flying lap this session */
     sessionBest: null, // { driver, timeSec, t, lap }
+    /** Event-time of last quali.session_best alert (cooldown) */
     lastSessionBestAlertT: null,
+    /** How many session-best alerts emitted this segment */
+    sessionBestAlertCount: 0,
     /**
      * Race/sprint order heartbeat: event-time of last "order noise"
      * (lead change, swing, pit, flags, or prior snapshot).
@@ -249,6 +252,7 @@ export function reduceF1(state, event, opts = {}) {
     next.endedSegment = null;
     next.sessionBest = null;
     next.lastSessionBestAlertT = null;
+    next.sessionBestAlertCount = 0;
     next.lastOrderNoiseT = null;
     next.lastOrderPulseT = null;
     next.lastBigSwingByDriver = {};
@@ -945,6 +949,7 @@ function applyRaceControl(state, p, t) {
     if (isKnockoutMode(state) && state.segment > 1) {
       state.sessionBest = null;
       state.lastSessionBestAlertT = null;
+      state.sessionBestAlertCount = 0;
       state.radioEmitCount = 0;
       state.lastRadioEmitT = null;
       state.lastRadioInterestT = null;
@@ -955,6 +960,13 @@ function applyRaceControl(state, p, t) {
       state.lastRadioInterestT = t || state.lastEventT;
       state.poleEmitted = false;
       state.provisionalPoleDriver = null;
+      state.sessionBestAlertCount = 0;
+      state.lastSessionBestAlertT = null;
+    }
+    // Every segment start (incl. Q1): fresh session-best budget
+    if (isKnockoutMode(state) || isQualifyingMode(state)) {
+      state.sessionBestAlertCount = 0;
+      state.lastSessionBestAlertT = null;
     }
     return;
   }

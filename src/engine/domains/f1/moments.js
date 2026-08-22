@@ -20,12 +20,14 @@ import {
   isPositionMapSane,
 } from "./snapshot.js";
 
-/** Min gap between session-best alerts (event time). */
-const SESSION_BEST_COOLDOWN_MS = 45_000;
-/** Same driver must beat their previous best by at least this much to re-alert. */
-const SESSION_BEST_MIN_IMPROVE_SEC = 0.05;
-/** Ignore "fastest lap" noise in the opening minutes of a Q/SQ segment. */
-const SESSION_BEST_WARMUP_MS = 3 * 60 * 1000;
+/** Min gap between session-best *alerts* (event time). */
+const SESSION_BEST_COOLDOWN_MS = 60_000;
+/** Ignore tiny improvements (same or new driver). */
+const SESSION_BEST_MIN_IMPROVE_SEC = 0.1;
+/** Ignore "fastest lap" in the opening stretch of a Q/SQ segment (out-laps). */
+const SESSION_BEST_WARMUP_MS = 8 * 60 * 1000;
+/** Hard cap session-best Telegram pings per Q1/Q2/Q3 (or SQ) segment. */
+const SESSION_BEST_MAX_PER_SEGMENT = 3;
 /** Race/sprint: top-5 board if quiet this long (event time). */
 export const ORDER_PULSE_MS = 12 * 60 * 1000;
 
@@ -216,6 +218,13 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
       next = {
         ...next,
         lastWeatherRainAlertT: t || next.lastWeatherRainAlertT,
+      };
+    }
+    if (m.type === "quali.session_best") {
+      next = {
+        ...next,
+        lastSessionBestAlertT: t || m.t || next.lastSessionBestAlertT,
+        sessionBestAlertCount: (next.sessionBestAlertCount || 0) + 1,
       };
     }
   }
@@ -559,21 +568,23 @@ function fromLap(prev, next, p, t) {
 
   const tMs = toMs(best.improvedAt || t) || 0;
 
-  // Opening minutes of a segment: out-laps / installation times aren't interesting
+  // Opening stretch: out-laps aren't interesting.
+  // Q3/SQ3 is short — use a shorter warmup so late provisional fights still alert.
   const startMs = toMs(next.segmentStartT);
-  if (
-    startMs != null &&
-    tMs >= startMs &&
-    tMs - startMs < SESSION_BEST_WARMUP_MS
-  ) {
+  const seg = next.segment || 1;
+  const warmupMs =
+    seg >= 3 ? 2 * 60 * 1000 : SESSION_BEST_WARMUP_MS;
+  if (startMs != null && tMs >= startMs && tMs - startMs < warmupMs) {
     return [];
   }
 
-  // Same driver shaving hundredths (common in Q/SQ) — not worth a Telegram ping
+  // Cap per segment (reset when segmentStartT advances — see SESSION STARTED)
+  if ((next.sessionBestAlertCount || 0) >= SESSION_BEST_MAX_PER_SEGMENT) {
+    return [];
+  }
+
+  // Tiny gains aren't worth a ping (leader thrash of 0.03s, etc.)
   if (
-    prev.sessionBest &&
-    best.prevDriver != null &&
-    Number(best.driver) === Number(best.prevDriver) &&
     best.prevTimeSec != null &&
     Number.isFinite(Number(best.timeSec)) &&
     Number.isFinite(Number(best.prevTimeSec))
@@ -582,11 +593,15 @@ function fromLap(prev, next, p, t) {
     if (gain < SESSION_BEST_MIN_IMPROVE_SEC) return [];
   }
 
-  const prevAt = toMs(prev.sessionBest?.improvedAt);
+  // Cooldown must use last *alert* time — sessionBest._improved is cleared by
+  // later non-improving laps, so that flag is useless for spacing Telegram.
+  const lastAlertMs = toMs(
+    prev.lastSessionBestAlertT || next.lastSessionBestAlertT,
+  );
   if (
-    prev.sessionBest?._improved &&
-    prevAt != null &&
-    tMs - prevAt < SESSION_BEST_COOLDOWN_MS
+    lastAlertMs != null &&
+    tMs - lastAlertMs >= 0 &&
+    tMs - lastAlertMs < SESSION_BEST_COOLDOWN_MS
   ) {
     return [];
   }
