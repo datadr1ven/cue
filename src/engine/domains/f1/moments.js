@@ -50,6 +50,7 @@ const ORDER_NOISE_TYPES = new Set([
   "order.big_swing",
   "order.snapshot",
   "strategy.pit",
+  "strategy.sc_stay_inherit",
   "flag.vsc",
   "flag.safety_car",
   "flag.red",
@@ -63,6 +64,7 @@ const ORDER_NOISE_TYPES = new Set([
 const RADIO_INTEREST_TYPES = new Set([
   "order.leader_change",
   "strategy.pit",
+  "strategy.sc_stay_inherit",
   "flag.vsc",
   "flag.safety_car",
   "flag.red",
@@ -225,6 +227,22 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
       lastOrderNoiseT: t || next.lastOrderNoiseT,
       lastOrderPulseSig: sig != null ? sig : next.lastOrderPulseSig,
     };
+  }
+  const scPit = moments.find(
+    (m) => m.type === "strategy.pit" && m.data?.underScPit,
+  );
+  if (scPit && scPit.data?.driver != null && scPit.data?.positionIn != null) {
+    next = {
+      ...next,
+      lastScPitTop: {
+        driver: Number(scPit.data.driver),
+        fromPos: Number(scPit.data.positionIn),
+        t: scPit.t || t,
+      },
+    };
+  }
+  if (moments.some((m) => m.type === "strategy.sc_stay_inherit")) {
+    next = { ...next, lastScPitTop: null };
   }
   for (const m of moments) {
     if (m.type === "order.big_swing" && m.data?.driver != null) {
@@ -790,6 +808,55 @@ function fromPosition(prev, next, p, t) {
         gained: delta,
       },
     });
+  }
+
+  // Stay-out inherits place after a top-5 SC pit (HAM pits → RUS to P2)
+  const scPit = next.lastScPitTop || prev.lastScPitTop;
+  const status = next.trackStatus || prev.trackStatus;
+  if (
+    scPit &&
+    status === "safety_car" &&
+    num !== Number(scPit.driver) &&
+    Number(oldPos) > Number(scPit.fromPos) &&
+    newPos <= Number(scPit.fromPos)
+  ) {
+    const tMs = toMs(t);
+    const pitMs = toMs(scPit.t);
+    if (
+      tMs != null &&
+      pitMs != null &&
+      tMs - pitMs >= 0 &&
+      tMs - pitMs < 3 * 60 * 1000
+    ) {
+      // Stayer must not have just pitted themselves
+      const ownPitT = next.lastPit?.[num]?.t || prev.lastPit?.[num]?.t;
+      const ownPitMs = toMs(ownPitT);
+      const ownPittedUnderSc =
+        ownPitMs != null &&
+        pitMs != null &&
+        ownPitMs >= pitMs - 60_000 &&
+        ownPitMs <= tMs;
+      if (!ownPittedUnderSc) {
+        out.push({
+          id: `sc-inherit-${num}-${scPit.driver}-${t}`,
+          type: "strategy.sc_stay_inherit",
+          severity: 8,
+          t,
+          entities: [num, Number(scPit.driver)],
+          data: {
+            driver: num,
+            driverName: driverLabel(next, num),
+            toPos: newPos,
+            fromPos: Number(oldPos),
+            pittedDriver: Number(scPit.driver),
+            pittedName: driverLabel(next, Number(scPit.driver)),
+            pittedFromPos: Number(scPit.fromPos),
+            top3: topN(next, 3),
+            ...contextFields(next, phaseLabel(next)),
+          },
+        });
+      }
+    }
   }
 
   return out;

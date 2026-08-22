@@ -274,12 +274,20 @@ export function renderF1Moment(moment, state) {
         d.lap != null ? `lap ${d.lap}` : null,
         tyre,
         d.positionIn != null ? `from P${d.positionIn}` : null,
-        d.trackStatus && d.trackStatus !== "green"
-          ? `under ${d.trackStatus}`
-          : null,
+        d.underScPit
+          ? "under safety car"
+          : d.trackStatus && d.trackStatus !== "green"
+            ? `under ${d.trackStatus}`
+            : null,
       ].filter(Boolean);
       return withHead(head, bits.join(" · "));
     }
+
+    case "strategy.sc_stay_inherit":
+      return withHead(
+        head,
+        `📌 ${d.driverName} inherits P${d.toPos} · ${d.pittedName} pitted under SC from P${d.pittedFromPos}${top3clause(d.top3)}`,
+      );
 
     case "penalty.time":
       return withHead(head, `⚖️ ${shortMsg(d.message)}`);

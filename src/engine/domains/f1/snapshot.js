@@ -102,6 +102,13 @@ export function createF1State() {
     retirementEmitted: {},
     /** One-shot retirement moment for detector */
     _retirementEmit: null,
+    /**
+     * Latest top-5 pit under safety car — for stay-out inherit detection.
+     * { driver, fromPos, t }
+     */
+    lastScPitTop: null,
+    /** One-shot: stay-out car jumped a recent SC pitter */
+    _scStayInherit: null,
     /** Q3/SQ3: already announced pole (ignore duplicate CHEQUERED from feed) */
     poleEmitted: false,
     /** driver_number currently shown as (provisional) pole */
@@ -221,6 +228,8 @@ export function reduceF1(state, event, opts = {}) {
       : null,
     retirementEmitted: { ...(state.retirementEmitted || {}) },
     _retirementEmit: null,
+    lastScPitTop: state.lastScPitTop ? { ...state.lastScPitTop } : null,
+    _scStayInherit: null,
     sessionBest: state.sessionBest ? { ...state.sessionBest } : null,
     maxLapByDriver: { ...(state.maxLapByDriver || {}) },
     lapFinishAt: { ...(state.lapFinishAt || {}) },
@@ -266,6 +275,8 @@ export function reduceF1(state, event, opts = {}) {
     next.pendingRetirement = null;
     next.retirementEmitted = {};
     next._retirementEmit = null;
+    next.lastScPitTop = null;
+    next._scStayInherit = null;
     next.poleEmitted = false;
     next.provisionalPoleDriver = null;
     next.lastWeatherRainAlertT = null;
@@ -388,6 +399,18 @@ export function reduceF1(state, event, opts = {}) {
             trackStatus: next.trackStatus,
             driver: Number(num),
           };
+          // Arm stay-out watch immediately (position flips often beat stint join)
+          if (
+            next.trackStatus === "safety_car" &&
+            positionIn != null &&
+            positionIn <= 5
+          ) {
+            next.lastScPitTop = {
+              driver: Number(num),
+              fromPos: Number(positionIn),
+              t: event.t || next.lastEventT,
+            };
+          }
         }
       }
       break;
@@ -700,6 +723,10 @@ export function buildPitMoment(pit, opts = {}) {
   if (posIn != null && posIn <= 3) severity = 7;
   else if (posIn != null && posIn <= 10) severity = 6;
   if (opts.state && num === opts.state.leader) severity = 7;
+  // Top-5 pit under SC is the defining strategy call (Silverstone HAM→RUS)
+  const underScPit =
+    pit.trackStatus === "safety_car" && posIn != null && posIn <= 5;
+  if (underScPit) severity = Math.max(severity, 8);
 
   const name =
     opts.state != null
@@ -722,6 +749,7 @@ export function buildPitMoment(pit, opts = {}) {
       compoundOn: compoundOn || null,
       positionIn: posIn != null ? Number(posIn) : null,
       trackStatus: pit.trackStatus,
+      underScPit,
       timedOut: Boolean(opts.timedOut),
     },
   };
