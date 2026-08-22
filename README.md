@@ -112,6 +112,19 @@ CAPTURE_OUT=dutch-2026/fp2.ndjson npm run capture
 
 Uses the same OpenF1 live credentials as the worker (`OPENF1_USERNAME` / `OPENF1_PASSWORD`). Ctrl+C flushes and exits.
 
+### Download historical session (REST → NDJSON)
+
+Free OpenF1 historical API — same topics as capture, sorted by event time. No MQTT required.
+
+```bash
+npm run download -- 11348
+npm run download -- 11348 --out dutch-2026/sprint-downloaded.ndjson
+
+ENGINE_SESSION_KIND=sprint npm run replay -- 11348-downloaded.ndjson
+```
+
+Use this to compare against live `*.ndjson` captures or to build a larger offline corpus.
+
 ### Publish NDJSON to a local broker
 
 ```bash
