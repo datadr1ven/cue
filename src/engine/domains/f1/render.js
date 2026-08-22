@@ -204,6 +204,24 @@ export function renderF1Moment(moment, state) {
     case "flag.red":
       return withHead(head, `🔴 Red flag — ${shortMsg(d.message)}`);
 
+    case "retirement": {
+      const bits = [
+        `💥 ${d.driverName || "Driver"} out`,
+        d.position != null ? `was P${d.position}` : null,
+        d.lap != null ? `lap ${d.lap}` : null,
+        d.cause === "safety_car"
+          ? "→ safety car"
+          : d.cause === "vsc"
+            ? "→ VSC"
+            : d.cause === "red"
+              ? "→ red flag"
+              : d.source === "session_result"
+                ? "DNF"
+                : null,
+      ].filter(Boolean);
+      return withHead(head, bits.join(" · "));
+    }
+
     case "order.leader_change":
       return withHead(
         head,

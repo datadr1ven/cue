@@ -92,6 +92,16 @@ export function createF1State() {
     _raceFinishEmit: null,
     /** Already sent race finish this session (avoid double chequered+finished) */
     raceFinishEmitted: false,
+    /**
+     * Possible on-track retirement: incomplete flying lap for a race car.
+     * Flushed to a moment when SC/VSC/red follows (Silverstone VER).
+     * { driver, t, lap, position }
+     */
+    pendingRetirement: null,
+    /** driver_number → true once we emitted retirement this session */
+    retirementEmitted: {},
+    /** One-shot retirement moment for detector */
+    _retirementEmit: null,
     /** Q3/SQ3: already announced pole (ignore duplicate CHEQUERED from feed) */
     poleEmitted: false,
     /** driver_number currently shown as (provisional) pole */
@@ -206,6 +216,11 @@ export function reduceF1(state, event, opts = {}) {
       : null,
     _raceFinishEmit: null,
     raceFinishEmitted: Boolean(state.raceFinishEmitted),
+    pendingRetirement: state.pendingRetirement
+      ? { ...state.pendingRetirement }
+      : null,
+    retirementEmitted: { ...(state.retirementEmitted || {}) },
+    _retirementEmit: null,
     sessionBest: state.sessionBest ? { ...state.sessionBest } : null,
     maxLapByDriver: { ...(state.maxLapByDriver || {}) },
     lapFinishAt: { ...(state.lapFinishAt || {}) },
@@ -248,6 +263,9 @@ export function reduceF1(state, event, opts = {}) {
     next.pendingRaceFinish = null;
     next._raceFinishEmit = null;
     next.raceFinishEmitted = false;
+    next.pendingRetirement = null;
+    next.retirementEmitted = {};
+    next._retirementEmit = null;
     next.poleEmitted = false;
     next.provisionalPoleDriver = null;
     next.lastWeatherRainAlertT = null;
@@ -412,6 +430,10 @@ export function reduceF1(state, event, opts = {}) {
     }
     case "f1.race_control": {
       applyRaceControl(next, p, event.t);
+      break;
+    }
+    case "f1.session_result": {
+      applySessionResultDnf(next, p, event.t);
       break;
     }
     case "f1.weather": {
@@ -765,6 +787,69 @@ export function isRaceStyleMode(state) {
   return !isQualifyingMode(state);
 }
 
+/**
+ * Incomplete-lap pending → retirement when neutralisation confirms it.
+ * @param {object} state
+ * @param {string|null} t
+ * @param {string} cause
+ */
+function flushPendingRetirement(state, t, cause) {
+  const pending = state.pendingRetirement;
+  if (!pending || pending.driver == null) return;
+  const num = Number(pending.driver);
+  if (state.retirementEmitted?.[num]) {
+    state.pendingRetirement = null;
+    return;
+  }
+  const tMs = toMs(t || state.lastEventT);
+  const pMs = toMs(pending.t);
+  // Only link if the incomplete lap was recent (within ~3 minutes)
+  if (tMs != null && pMs != null && tMs - pMs > 3 * 60 * 1000) {
+    state.pendingRetirement = null;
+    return;
+  }
+  state._retirementEmit = {
+    driver: num,
+    t: t || pending.t || state.lastEventT,
+    lap: pending.lap,
+    position: pending.position,
+    cause,
+    source: "incomplete_lap",
+    severity: 9,
+  };
+  state.retirementEmitted = { ...state.retirementEmitted, [num]: true };
+  state.pendingRetirement = null;
+}
+
+/**
+ * Late/official DNF from session_result (Monaco multi-car lap-1 DNFs).
+ * @param {object} state
+ * @param {object} p
+ * @param {string|null} t
+ */
+function applySessionResultDnf(state, p, t) {
+  if (!isRaceStyleMode(state) && state.sessionKind !== "unknown") return;
+  if (!p || !p.dnf) return;
+  const num = Number(p.driver_number);
+  if (!Number.isFinite(num) || state.retirementEmitted?.[num]) return;
+  const pos =
+    state.position[num] != null
+      ? Number(state.position[num])
+      : p.position != null
+        ? Number(p.position)
+        : null;
+  state._retirementEmit = {
+    driver: num,
+    t: t || state.lastEventT,
+    lap: null,
+    position: pos,
+    cause: "dnf",
+    source: "session_result",
+    severity: 7,
+  };
+  state.retirementEmitted = { ...state.retirementEmitted, [num]: true };
+}
+
 function applyLap(state, p, t) {
   const driver = Number(p.driver_number);
   if (!Number.isFinite(driver)) return;
@@ -778,7 +863,30 @@ function applyLap(state, p, t) {
   }
 
   const dur = p.lap_duration;
-  if (dur == null || !Number.isFinite(Number(dur))) return;
+  if (dur == null || !Number.isFinite(Number(dur))) {
+    // Partial lap (sectors started, no finish) — often a beached/crashed car.
+    // Arm pending retirement; SC/VSC/red shortly after confirms it.
+    if (
+      isRaceStyleMode(state) &&
+      state.sessionActive &&
+      !p.is_pit_out_lap &&
+      p.duration_sector_1 != null &&
+      p.duration_sector_3 == null &&
+      !state.retirementEmitted?.[driver]
+    ) {
+      const pos =
+        state.position[driver] != null ? Number(state.position[driver]) : null;
+      if (pos != null && pos <= 12) {
+        state.pendingRetirement = {
+          driver,
+          t: t || p.date_start || null,
+          lap: ln,
+          position: pos,
+        };
+      }
+    }
+    return;
+  }
   if (p.is_pit_out_lap) return;
   const timeSec = Number(dur);
   // Real F1 flying laps are ~60–110s; reject in-laps / red-flag weirdness
@@ -1107,6 +1215,7 @@ function applyRaceControl(state, p, t) {
     state.lastOrderPulseT = null;
     state.lastOrderPulseSig = null;
     state.lastBigSwingByDriver = {};
+    state.pendingRetirement = null;
     // Fresh knockout segment (Q2/Q3): new radio budget
     if (isKnockoutMode(state) && state.segment > 1) {
       state.sessionBest = null;
@@ -1208,6 +1317,7 @@ function applyRaceControl(state, p, t) {
   ) {
     state.trackStatus = "vsc";
     state.lastRadioInterestT = t || state.lastEventT;
+    flushPendingRetirement(state, t, "vsc");
     return;
   }
   // "VSC IN THIS LAP" / "SAFETY CAR IN THIS LAP" mean ending *soon*, not
@@ -1233,6 +1343,7 @@ function applyRaceControl(state, p, t) {
       // Full SC is rare in practice; usually race or sprint
       state.sessionKind = "race";
     }
+    flushPendingRetirement(state, t, "safety_car");
     return;
   }
   // Do not match "SAFETY CAR IN THIS LAP" (still under SC).
@@ -1248,6 +1359,7 @@ function applyRaceControl(state, p, t) {
   ) {
     state.trackStatus = "red";
     state.lastRadioInterestT = t || state.lastEventT;
+    flushPendingRetirement(state, t, "red");
     return;
   }
   if (flag === "GREEN" || msg === "TRACK CLEAR") {

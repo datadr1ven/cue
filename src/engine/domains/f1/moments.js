@@ -53,6 +53,7 @@ const ORDER_NOISE_TYPES = new Set([
   "flag.vsc",
   "flag.safety_car",
   "flag.red",
+  "retirement",
   "session.started",
   "session.chequered",
   "session.finished",
@@ -65,6 +66,7 @@ const RADIO_INTEREST_TYPES = new Set([
   "flag.vsc",
   "flag.safety_car",
   "flag.red",
+  "retirement",
 ]);
 
 /** Hard cap radios per session (or per Q segment). */
@@ -139,6 +141,28 @@ export function detectF1Moments(prev, next, event) {
 
   if (event.type === "f1.team_radio") {
     moments.push(...fromRadio(next, p, t));
+  }
+
+  // Retirement (incomplete lap + SC/red, or session_result DNF)
+  if (next._retirementEmit) {
+    const r = next._retirementEmit;
+    const num = Number(r.driver);
+    moments.push({
+      id: `retirement-${num}-${r.t}`,
+      type: "retirement",
+      severity: r.severity ?? 8,
+      t: r.t || t,
+      entities: [num],
+      data: {
+        driver: num,
+        driverName: driverLabel(next, num),
+        position: r.position ?? null,
+        lap: r.lap ?? null,
+        cause: r.cause || null,
+        source: r.source || null,
+        ...contextFields(next, phaseLabel(next)),
+      },
+    });
   }
 
   // Deferred race finish (after chequered + lap completions)
