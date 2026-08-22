@@ -129,6 +129,8 @@ export function createF1State() {
     lastOrderNoiseT: null,
     /** Event-time of last order.snapshot pulse */
     lastOrderPulseT: null,
+    /** Top-N driver signature of last order.snapshot (skip unchanged pulses) */
+    lastOrderPulseSig: null,
     /** driver → event-time of last order.big_swing alert */
     lastBigSwingByDriver: {},
     /** Radios emitted this session (hard cap) */
@@ -266,6 +268,7 @@ export function reduceF1(state, event, opts = {}) {
     next._timeSheetDrama = null;
     next.lastOrderNoiseT = null;
     next.lastOrderPulseT = null;
+    next.lastOrderPulseSig = null;
     next.lastBigSwingByDriver = {};
     next.radioEmitCount = 0;
     next.lastRadioEmitT = null;
@@ -1080,6 +1083,7 @@ function applyRaceControl(state, p, t) {
     // Heartbeat silence clock starts at lights-out / restart
     state.lastOrderNoiseT = t || state.lastEventT;
     state.lastOrderPulseT = null;
+    state.lastOrderPulseSig = null;
     state.lastBigSwingByDriver = {};
     // Fresh knockout segment (Q2/Q3): new radio budget
     if (isKnockoutMode(state) && state.segment > 1) {

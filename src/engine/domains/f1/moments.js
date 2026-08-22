@@ -189,10 +189,13 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
     };
   }
   if (pulsed) {
+    const snap = moments.find((m) => m.type === "order.snapshot");
+    const sig = snap?.data?.pulseSig ?? null;
     next = {
       ...next,
       lastOrderPulseT: t || next.lastOrderPulseT,
       lastOrderNoiseT: t || next.lastOrderNoiseT,
+      lastOrderPulseSig: sig != null ? sig : next.lastOrderPulseSig,
     };
   }
   for (const m of moments) {
@@ -279,6 +282,13 @@ function maybeOrderPulse(state, event) {
   // must not pulse — wait until the map is coherent.
   if (!isPositionMapSane(state)) return [];
 
+  // Processional races (Monaco '24, Zandvoort sprint): same top-5 every
+  // 12 minutes is noise — only pulse when the board actually changes.
+  const sig = top5.map((x) => x.driver).join(",");
+  if (state.lastOrderPulseSig != null && state.lastOrderPulseSig === sig) {
+    return [];
+  }
+
   // Prefer a real feed clock for the moment stamp (not wall-clock fallback).
   const stamp = state.lastEventT || t;
 
@@ -291,6 +301,7 @@ function maybeOrderPulse(state, event) {
       data: {
         top5,
         approx: true,
+        pulseSig: sig,
         label: phaseLabel(state) || "Race",
         ...contextFields(state, phaseLabel(state)),
       },
