@@ -93,6 +93,7 @@ export function detectF1Moments(prev, next, event) {
 
   if (event.type === "f1.laps") {
     moments.push(...fromLap(prev, next, p, t));
+    moments.push(...fromTimeSheetDrama(prev, next, t));
   }
 
   if (event.type === "f1.weather") {
@@ -557,24 +558,32 @@ function fromRaceControl(prev, next, p, t) {
   return out;
 }
 
+/** Q3/SQ3: ignore time-sheet drama in the first minutes (out-laps). */
+const TIME_SHEET_WARMUP_MS = 4 * 60 * 1000;
+/** Near-miss: within this of provisional P1 on a personal best. */
+const CLOSE_TO_POLE_SEC = 0.15;
+
 function fromLap(prev, next, p, t) {
   if (!next.sessionBest?._improved) return [];
   // Knockout formats only — not practice / race / sprint race
   if (!isKnockoutMode(next) && !isQualifyingMode(next)) return [];
   if (isPracticeMode(next)) return [];
 
+  // Q3/SQ3: time-sheet drama (prov P1 / close) owns the story — not session_best
+  if ((next.segment || 0) >= 3) return [];
+
   const best = next.sessionBest;
   if (prev.sessionBest && prev.sessionBest.timeSec === best.timeSec) return [];
 
   const tMs = toMs(best.improvedAt || t) || 0;
 
-  // Opening stretch: out-laps aren't interesting.
-  // Q3/SQ3 is short — use a shorter warmup so late provisional fights still alert.
+  // Opening stretch: out-laps aren't interesting (Q1/Q2 only here).
   const startMs = toMs(next.segmentStartT);
-  const seg = next.segment || 1;
-  const warmupMs =
-    seg >= 3 ? 2 * 60 * 1000 : SESSION_BEST_WARMUP_MS;
-  if (startMs != null && tMs >= startMs && tMs - startMs < warmupMs) {
+  if (
+    startMs != null &&
+    tMs >= startMs &&
+    tMs - startMs < SESSION_BEST_WARMUP_MS
+  ) {
     return [];
   }
 
@@ -1004,6 +1013,99 @@ function maybeProvisionalPoleChange(prev, next, t) {
 
 /** OpenF1 rainfall bit flaps — don't re-alert more often than this. */
 const WEATHER_RAIN_COOLDOWN_MS = 15 * 60 * 1000;
+
+/**
+ * Late Q3/SQ3 time-sheet: provisional P1 changes + close-but-no-cigar.
+ * Staged in reduce as next._timeSheetDrama.
+ */
+function fromTimeSheetDrama(prev, next, t) {
+  const d = next._timeSheetDrama;
+  if (!d || (next.segment || 0) < 3 || next.chequered) return [];
+
+  const tMs = toMs(d.t || t) || 0;
+  const startMs = toMs(next.segmentStartT);
+  if (
+    startMs != null &&
+    tMs >= startMs &&
+    tMs - startMs < TIME_SHEET_WARMUP_MS
+  ) {
+    return [];
+  }
+
+  const label = segmentLabel(3, next.sessionKind);
+  const top3 = (d.top3 || []).map((r) => ({
+    driver: r.driver,
+    pos: r.rank,
+    timeSec: r.timeSec,
+    name: driverLabel(next, r.driver),
+  }));
+
+  if (d.kind === "prov_p1") {
+    // First name on the board is often an out-lap — wait for a real field
+    if (d.fromRank == null) {
+      const n = Object.keys(next.segmentLapBest || {}).length;
+      if (n < 3 || d.timeSec > 95) return [];
+    }
+    const jumped = d.jumped != null ? d.jumped : null;
+    return [
+      {
+        id: `prov-p1-${d.driver}-${d.timeSec}-${d.t || t}`,
+        type: "quali.prov_p1",
+        severity: 8,
+        t: d.t || t,
+        entities: [d.driver],
+        data: {
+          driver: d.driver,
+          driverName: driverLabel(next, d.driver),
+          timeSec: d.timeSec,
+          timeLabel: formatLapTime(d.timeSec),
+          fromRank: d.fromRank,
+          toRank: 1,
+          jumped,
+          prevLeader: d.prevLeader,
+          prevLeaderName:
+            d.prevLeader != null ? driverLabel(next, d.prevLeader) : null,
+          top3,
+          label,
+          sprintShootout: next.sessionKind === "sprint_qualifying",
+          ...contextFields(next, label),
+        },
+      },
+    ];
+  }
+
+  if (d.kind === "close") {
+    if (d.gapToLeader == null || d.gapToLeader > CLOSE_TO_POLE_SEC + 1e-9) {
+      return [];
+    }
+    return [
+      {
+        id: `close-pole-${d.driver}-${d.timeSec}-${d.t || t}`,
+        type: "quali.close_to_pole",
+        severity: 7,
+        t: d.t || t,
+        entities: [d.driver],
+        data: {
+          driver: d.driver,
+          driverName: driverLabel(next, d.driver),
+          timeSec: d.timeSec,
+          timeLabel: formatLapTime(d.timeSec),
+          toRank: d.toRank,
+          gapToLeader: d.gapToLeader,
+          leader: d.leader,
+          leaderName: d.leader != null ? driverLabel(next, d.leader) : null,
+          leaderTimeSec: d.leaderTime,
+          top3,
+          label,
+          sprintShootout: next.sessionKind === "sprint_qualifying",
+          ...contextFields(next, label),
+        },
+      },
+    ];
+  }
+
+  return [];
+}
 
 function fromWeather(prev, next, p, t) {
   const prevR = Number(prev.weather?.rainfall);

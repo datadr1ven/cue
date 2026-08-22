@@ -109,6 +109,41 @@ export function renderF1Moment(moment, state) {
         `📈 ${d.driverName || "Driver"} into the ${d.label || "Q"} cut · P${d.fromPos}→P${d.toPos}`,
       );
 
+    case "quali.prov_p1": {
+      const jump =
+        d.jumped != null && d.jumped > 0
+          ? ` (was P${d.fromRank}, ↑${d.jumped})`
+          : d.fromRank != null
+            ? ` (was P${d.fromRank})`
+            : "";
+      const was = d.prevLeaderName ? ` · was ${d.prevLeaderName}` : "";
+      const top =
+        d.top3?.length > 0
+          ? "\n" +
+            d.top3
+              .map(
+                (x) =>
+                  `P${x.pos} ${x.name}${x.timeSec != null ? ` ${formatLapTime(x.timeSec)}` : ""}`,
+              )
+              .join(" · ")
+          : "";
+      const kind = d.sprintShootout ? "sprint pole" : "pole";
+      return withHead(
+        head,
+        `🥇 Provisional ${kind}: ${d.driverName || "—"}${jump}${was}\n${d.timeLabel || formatLapTime(d.timeSec)}${top}`,
+      );
+    }
+
+    case "quali.close_to_pole": {
+      const gap =
+        d.gapToLeader != null ? ` · +${Number(d.gapToLeader).toFixed(3)}s` : "";
+      const lead = d.leaderName ? ` to ${d.leaderName}` : "";
+      return withHead(
+        head,
+        `🤏 ${d.driverName || "Driver"} P${d.toRank}${gap}${lead} · ${d.timeLabel || formatLapTime(d.timeSec)} (close, no ${d.sprintShootout ? "sprint " : ""}pole)`,
+      );
+    }
+
     case "weather.rain_risk":
       return withHead(
         head,

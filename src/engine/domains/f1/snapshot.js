@@ -116,6 +116,13 @@ export function createF1State() {
     /** How many session-best alerts emitted this segment */
     sessionBestAlertCount: 0,
     /**
+     * Knockout segment: driver → best flying lap this segment (time sheet).
+     * @type {Record<number, { timeSec: number, t: string|null, lap: number|null }>}
+     */
+    segmentLapBest: {},
+    /** One-shot for detector: time-sheet drama from latest lap */
+    _timeSheetDrama: null,
+    /**
      * Race/sprint order heartbeat: event-time of last "order noise"
      * (lead change, swing, pit, flags, or prior snapshot).
      */
@@ -191,6 +198,7 @@ export function reduceF1(state, event, opts = {}) {
       : [],
     pendingPits: { ...(state.pendingPits || {}) },
     _pitCombined: null,
+    _timeSheetDrama: null,
     pendingRaceFinish: state.pendingRaceFinish
       ? { ...state.pendingRaceFinish }
       : null,
@@ -200,6 +208,7 @@ export function reduceF1(state, event, opts = {}) {
     maxLapByDriver: { ...(state.maxLapByDriver || {}) },
     lapFinishAt: { ...(state.lapFinishAt || {}) },
     lastBigSwingByDriver: { ...(state.lastBigSwingByDriver || {}) },
+    segmentLapBest: { ...(state.segmentLapBest || {}) },
   };
 
   if (opts.sessionKind && !next.sessionKindForced) {
@@ -253,6 +262,8 @@ export function reduceF1(state, event, opts = {}) {
     next.sessionBest = null;
     next.lastSessionBestAlertT = null;
     next.sessionBestAlertCount = 0;
+    next.segmentLapBest = {};
+    next._timeSheetDrama = null;
     next.lastOrderNoiseT = null;
     next.lastOrderPulseT = null;
     next.lastBigSwingByDriver = {};
@@ -784,6 +795,95 @@ function applyLap(state, p, t) {
   } else if (state.sessionBest) {
     state.sessionBest = { ...state.sessionBest, _improved: false };
   }
+
+  // Q/SQ time sheet (per-segment bests) — fuels late-Q3 drama detectors
+  if (isKnockoutMode(state) && (state.segment || 0) >= 1 && !state.chequered) {
+    updateSegmentTimeSheet(state, driver, timeSec, t || p.date_start || null, ln);
+  }
+}
+
+/**
+ * Rank drivers by best flying lap this knockout segment.
+ * @param {Record<number, { timeSec: number }>|object} segmentLapBest
+ * @returns {{ driver: number, timeSec: number, rank: number }[]}
+ */
+export function rankSegmentTimeSheet(segmentLapBest) {
+  return Object.entries(segmentLapBest || {})
+    .map(([num, b]) => ({
+      driver: Number(num),
+      timeSec: Number(b.timeSec),
+    }))
+    .filter((r) => Number.isFinite(r.driver) && Number.isFinite(r.timeSec))
+    .sort((a, b) => a.timeSec - b.timeSec)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+/**
+ * @param {object} state
+ * @param {number} driver
+ * @param {number} timeSec
+ * @param {string|null} t
+ * @param {number|null} lap
+ */
+function updateSegmentTimeSheet(state, driver, timeSec, t, lap) {
+  const sheet = { ...(state.segmentLapBest || {}) };
+  const prevBest = sheet[driver];
+  if (prevBest && !(timeSec < prevBest.timeSec - 1e-9)) return;
+
+  const before = rankSegmentTimeSheet(sheet);
+  const fromRank = before.find((r) => r.driver === driver)?.rank ?? null;
+  const prevLeader = before[0] || null;
+
+  sheet[driver] = {
+    timeSec,
+    t: t || null,
+    lap: lap ?? null,
+  };
+  state.segmentLapBest = sheet;
+
+  const after = rankSegmentTimeSheet(sheet);
+  const row = after.find((r) => r.driver === driver);
+  if (!row) return;
+
+  const leader = after[0];
+  const gapToLeader =
+    leader && row.rank > 1 ? row.timeSec - leader.timeSec : 0;
+
+  // Only stage drama for Q3/SQ3 (final segment)
+  if ((state.segment || 0) < 3) return;
+
+  if (row.rank === 1 && (fromRank == null || fromRank !== 1)) {
+    state._timeSheetDrama = {
+      kind: "prov_p1",
+      driver,
+      timeSec,
+      fromRank,
+      toRank: 1,
+      jumped: fromRank != null ? fromRank - 1 : null,
+      prevLeader: prevLeader?.driver ?? null,
+      prevLeaderTime: prevLeader?.timeSec ?? null,
+      top3: after.slice(0, 3),
+      t: t || state.lastEventT,
+    };
+  } else if (
+    row.rank >= 2 &&
+    row.rank <= 3 &&
+    gapToLeader <= 0.15 + 1e-9 &&
+    gapToLeader >= 0
+  ) {
+    state._timeSheetDrama = {
+      kind: "close",
+      driver,
+      timeSec,
+      fromRank,
+      toRank: row.rank,
+      gapToLeader,
+      leader: leader?.driver ?? null,
+      leaderTime: leader?.timeSec ?? null,
+      top3: after.slice(0, 3),
+      t: t || state.lastEventT,
+    };
+  }
 }
 
 /**
@@ -950,6 +1050,8 @@ function applyRaceControl(state, p, t) {
       state.sessionBest = null;
       state.lastSessionBestAlertT = null;
       state.sessionBestAlertCount = 0;
+      state.segmentLapBest = {};
+      state._timeSheetDrama = null;
       state.radioEmitCount = 0;
       state.lastRadioEmitT = null;
       state.lastRadioInterestT = null;
@@ -962,11 +1064,15 @@ function applyRaceControl(state, p, t) {
       state.provisionalPoleDriver = null;
       state.sessionBestAlertCount = 0;
       state.lastSessionBestAlertT = null;
+      state.segmentLapBest = {};
+      state._timeSheetDrama = null;
     }
-    // Every segment start (incl. Q1): fresh session-best budget
+    // Every segment start (incl. Q1): fresh session-best / time-sheet budget
     if (isKnockoutMode(state) || isQualifyingMode(state)) {
       state.sessionBestAlertCount = 0;
       state.lastSessionBestAlertT = null;
+      state.segmentLapBest = {};
+      state._timeSheetDrama = null;
     }
     return;
   }
