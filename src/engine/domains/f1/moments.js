@@ -363,7 +363,13 @@ function fromRaceControl(prev, next, p, t) {
     }
   }
 
-  if (up.includes("VSC DEPLOYED")) {
+  // OpenF1 uses both "VSC DEPLOYED" and "VIRTUAL SAFETY CAR DEPLOYED".
+  // The latter also contains "SAFETY CAR DEPLOYED" — match VSC first and
+  // exclude VIRTUAL/VSC from the full-SC branch (Brazil '24 mislabel).
+  if (
+    up.includes("VSC DEPLOYED") ||
+    up.includes("VIRTUAL SAFETY CAR DEPLOYED")
+  ) {
     out.push({
       id: `vsc-deployed-${t}`,
       type: "flag.vsc",
@@ -376,12 +382,11 @@ function fromRaceControl(prev, next, p, t) {
         top3: topN(next, 3),
       },
     });
-  }
-
-  if (
+  } else if (
     (up.includes("SAFETY CAR DEPLOYED") ||
       (p.category === "SafetyCar" && up.includes("DEPLOYED"))) &&
-    !up.includes("VSC")
+    !up.includes("VSC") &&
+    !up.includes("VIRTUAL")
   ) {
     out.push({
       id: `sc-deployed-${t}`,

@@ -1168,12 +1168,22 @@ function applyRaceControl(state, p, t) {
     return;
   }
 
-  if (msg.includes("VSC DEPLOYED")) {
+  // OpenF1: "VSC DEPLOYED" or "VIRTUAL SAFETY CAR DEPLOYED" (latter also
+  // contains "SAFETY CAR DEPLOYED" — handle VSC before full SC).
+  if (
+    msg.includes("VSC DEPLOYED") ||
+    msg.includes("VIRTUAL SAFETY CAR DEPLOYED")
+  ) {
     state.trackStatus = "vsc";
     state.lastRadioInterestT = t || state.lastEventT;
     return;
   }
-  if (msg.includes("VSC ENDING") || msg.includes("VSC IN THIS LAP")) {
+  if (
+    msg.includes("VSC ENDING") ||
+    msg.includes("VSC IN THIS LAP") ||
+    msg.includes("VIRTUAL SAFETY CAR ENDING") ||
+    msg.includes("VIRTUAL SAFETY CAR IN THIS LAP")
+  ) {
     state.trackStatus = "green";
     state.lastOrderNoiseT = t || state.lastEventT; // restart silence after neutralisation
     return;
@@ -1182,7 +1192,8 @@ function applyRaceControl(state, p, t) {
   if (
     (cat === "SafetyCar" || msg.includes("SAFETY CAR")) &&
     msg.includes("DEPLOYED") &&
-    !msg.includes("VSC")
+    !msg.includes("VSC") &&
+    !msg.includes("VIRTUAL")
   ) {
     state.trackStatus = "safety_car";
     state.lastRadioInterestT = t || state.lastEventT;
@@ -1192,7 +1203,10 @@ function applyRaceControl(state, p, t) {
     }
     return;
   }
-  if (msg.includes("SAFETY CAR IN") || msg.includes("SAFETY CAR ENDING")) {
+  if (
+    (msg.includes("SAFETY CAR IN") || msg.includes("SAFETY CAR ENDING")) &&
+    !msg.includes("VIRTUAL")
+  ) {
     state.trackStatus = "green";
     state.lastOrderNoiseT = t || state.lastEventT;
     return;
