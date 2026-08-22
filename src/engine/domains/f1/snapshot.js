@@ -355,17 +355,22 @@ export function reduceF1(state, event, opts = {}) {
         !isKnockoutMode(next) &&
         !isQualifyingMode(next)
       ) {
-        next.pendingPits[num] = {
-          wallMs: Date.now(),
-          t: event.t,
-          lap: p.lap_number ?? null,
-          stop: p.stop_duration ?? null,
-          lane: p.lane_duration ?? p.pit_duration ?? null,
-          compoundOff,
-          positionIn,
-          trackStatus: next.trackStatus,
-          driver: Number(num),
-        };
+        const lane = p.lane_duration ?? p.pit_duration ?? null;
+        // Under red, or absurd lane time (red-flag hold) — count the pit
+        // for stats but do not queue a strategy.pit alert.
+        if (next.trackStatus !== "red" && !isNonAlertPitLane(lane)) {
+          next.pendingPits[num] = {
+            wallMs: Date.now(),
+            t: event.t,
+            lap: p.lap_number ?? null,
+            stop: p.stop_duration ?? null,
+            lane,
+            compoundOff,
+            positionIn,
+            trackStatus: next.trackStatus,
+            driver: Number(num),
+          };
+        }
       }
       break;
     }
@@ -599,6 +604,18 @@ function noteCompound(state, compound) {
 export const PIT_COMPOUND_WAIT_MS = 5_000;
 
 /**
+ * Red-flag pit-lane holds (Monaco '24) show up as multi-minute "pits".
+ * Real stops are well under a minute; treat long lane times as non-alerts.
+ */
+export const PIT_ALERT_MAX_LANE_S = 90;
+
+/** @param {number|null|undefined} laneSec */
+export function isNonAlertPitLane(laneSec) {
+  const n = Number(laneSec);
+  return Number.isFinite(n) && n > PIT_ALERT_MAX_LANE_S;
+}
+
+/**
  * Flush deferred pits whose stint compound never arrived in time.
  * @param {object} state
  * @param {number} [nowMs]
@@ -612,7 +629,8 @@ export function flushExpiredPits(state, nowMs = Date.now()) {
   let changed = false;
   for (const [key, pit] of Object.entries(pending)) {
     if (nowMs - (pit.wallMs || 0) < PIT_COMPOUND_WAIT_MS) continue;
-    moments.push(buildPitMoment(pit, { timedOut: true, state: next }));
+    const m = buildPitMoment(pit, { timedOut: true, state: next });
+    if (m) moments.push(m);
     delete pending[key];
     changed = true;
   }
@@ -646,8 +664,12 @@ export function flushExpiredPits(state, nowMs = Date.now()) {
 /**
  * @param {object} pit  pending or combined pit fields
  * @param {{ timedOut?: boolean, compoundOn?: string|null, state?: object }} [opts]
+ * @returns {import('../../types.js').Moment|null}
  */
 export function buildPitMoment(pit, opts = {}) {
+  if (pit.trackStatus === "red" || isNonAlertPitLane(pit.lane)) {
+    return null;
+  }
   const num = Number(pit.driver);
   const compoundOn = opts.compoundOn ?? pit.compoundOn ?? null;
   const posIn = pit.positionIn;

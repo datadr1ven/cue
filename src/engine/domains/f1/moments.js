@@ -127,15 +127,14 @@ export function detectF1Moments(prev, next, event) {
     next._pitCombined
   ) {
     const c = next._pitCombined;
-    moments.push(
-      buildPitMoment(
-        {
-          ...c,
-          driver: c.driver,
-        },
-        { compoundOn: c.compoundOn, state: next },
-      ),
+    const pitMoment = buildPitMoment(
+      {
+        ...c,
+        driver: c.driver,
+      },
+      { compoundOn: c.compoundOn, state: next },
     );
+    if (pitMoment) moments.push(pitMoment);
   }
 
   if (event.type === "f1.team_radio") {
