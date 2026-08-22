@@ -562,6 +562,36 @@ function fromRaceControl(prev, next, p, t) {
     });
   }
 
+  // SC unlapping window (Silverstone '26 messaging drama)
+  if (
+    up.includes("LAPPED CARS MAY NOW OVERTAKE") ||
+    up.includes("LAPPED CARS MAY OVERTAKE THE SAFETY CAR")
+  ) {
+    // Message shape: "... SAFETY CAR: 81, 14, 87, ..." (no "CAR N" tokens)
+    const cars = extractCarNumbers(msg);
+    const colon = msg.indexOf(":");
+    if (colon >= 0) {
+      for (const m of msg.slice(colon + 1).matchAll(/\b(\d{1,2})\b/g)) {
+        const n = Number(m[1]);
+        if (Number.isFinite(n) && !cars.includes(n)) cars.push(n);
+      }
+    }
+    out.push({
+      id: `sc-unlap-${t}`,
+      type: "flag.sc_unlap",
+      severity: 6,
+      t,
+      entities: cars,
+      data: {
+        message: msg,
+        cars,
+        leader: next.leader,
+        leaderName:
+          next.leader != null ? driverLabel(next, next.leader) : null,
+      },
+    });
+  }
+
   // Penalties / investigations — squelch before first SESSION STARTED (pre-grid noise).
   // Still allow between Q segments (chequered / awaiting next).
   const sessionBegun = Boolean(

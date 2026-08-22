@@ -201,6 +201,16 @@ export function renderF1Moment(moment, state) {
     case "flag.safety_car":
       return withHead(head, `🚨 Safety car deployed${leaderClause(d)}`);
 
+    case "flag.sc_unlap": {
+      const n = Array.isArray(d.cars) ? d.cars.length : 0;
+      const who =
+        n > 0 ? `${n} car${n === 1 ? "" : "s"}` : "lapped cars";
+      return withHead(
+        head,
+        `↩️ ${who} may overtake the safety car${leaderClause(d)}`,
+      );
+    }
+
     case "flag.red":
       return withHead(head, `🔴 Red flag — ${shortMsg(d.message)}`);
 
