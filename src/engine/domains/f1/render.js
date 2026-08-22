@@ -110,13 +110,7 @@ export function renderF1Moment(moment, state) {
       );
 
     case "quali.prov_p1": {
-      const jump =
-        d.jumped != null && d.jumped > 0
-          ? ` (was P${d.fromRank}, ↑${d.jumped})`
-          : d.fromRank != null
-            ? ` (was P${d.fromRank})`
-            : "";
-      const was = d.prevLeaderName ? ` · was ${d.prevLeaderName}` : "";
+      const kind = d.sprintShootout ? "sprint pole" : "pole";
       const top =
         d.top3?.length > 0
           ? "\n" +
@@ -127,7 +121,21 @@ export function renderF1Moment(moment, state) {
               )
               .join(" · ")
           : "";
-      const kind = d.sprintShootout ? "sprint pole" : "pole";
+      if (d.cleanedUp) {
+        const prevT =
+          d.prevTimeSec != null ? ` (was ${formatLapTime(d.prevTimeSec)})` : "";
+        return withHead(
+          head,
+          `🥇 Provisional ${kind} time: ${d.driverName || "—"}${prevT}\n${d.timeLabel || formatLapTime(d.timeSec)}${top}`,
+        );
+      }
+      const jump =
+        d.jumped != null && d.jumped > 0
+          ? ` (was P${d.fromRank}, ↑${d.jumped})`
+          : d.fromRank != null
+            ? ` (was P${d.fromRank})`
+            : "";
+      const was = d.prevLeaderName ? ` · was ${d.prevLeaderName}` : "";
       return withHead(
         head,
         `🥇 Provisional ${kind}: ${d.driverName || "—"}${jump}${was}\n${d.timeLabel || formatLapTime(d.timeSec)}${top}`,

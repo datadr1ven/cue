@@ -1020,11 +1020,14 @@ const WEATHER_RAIN_COOLDOWN_MS = 15 * 60 * 1000;
  */
 function fromTimeSheetDrama(prev, next, t) {
   const d = next._timeSheetDrama;
-  if (!d || (next.segment || 0) < 3 || next.chequered) return [];
+  if (!d || (next.segment || 0) < 3) return [];
+  // After the flag: still allow close-calls; P1 changes are owned by pole / pole_change
+  if (next.chequered && d.kind === "prov_p1") return [];
 
   const tMs = toMs(d.t || t) || 0;
   const startMs = toMs(next.segmentStartT);
   if (
+    !next.chequered &&
     startMs != null &&
     tMs >= startMs &&
     tMs - startMs < TIME_SHEET_WARMUP_MS
@@ -1033,6 +1036,7 @@ function fromTimeSheetDrama(prev, next, t) {
   }
 
   const label = segmentLabel(3, next.sessionKind);
+  const sprintShootout = next.sessionKind === "sprint_qualifying";
   const top3 = (d.top3 || []).map((r) => ({
     driver: r.driver,
     pos: r.rank,
@@ -1042,7 +1046,7 @@ function fromTimeSheetDrama(prev, next, t) {
 
   if (d.kind === "prov_p1") {
     // First name on the board is often an out-lap — wait for a real field
-    if (d.fromRank == null) {
+    if (d.fromRank == null && !d.cleanedUp) {
       const n = Object.keys(next.segmentLapBest || {}).length;
       if (n < 3 || d.timeSec > 95) return [];
     }
@@ -1062,12 +1066,14 @@ function fromTimeSheetDrama(prev, next, t) {
           fromRank: d.fromRank,
           toRank: 1,
           jumped,
+          cleanedUp: Boolean(d.cleanedUp),
+          prevTimeSec: d.prevTimeSec ?? null,
           prevLeader: d.prevLeader,
           prevLeaderName:
             d.prevLeader != null ? driverLabel(next, d.prevLeader) : null,
           top3,
           label,
-          sprintShootout: next.sessionKind === "sprint_qualifying",
+          sprintShootout,
           ...contextFields(next, label),
         },
       },
@@ -1097,7 +1103,7 @@ function fromTimeSheetDrama(prev, next, t) {
           leaderTimeSec: d.leaderTime,
           top3,
           label,
-          sprintShootout: next.sessionKind === "sprint_qualifying",
+          sprintShootout,
           ...contextFields(next, label),
         },
       },

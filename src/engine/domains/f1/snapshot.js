@@ -796,9 +796,19 @@ function applyLap(state, p, t) {
     state.sessionBest = { ...state.sessionBest, _improved: false };
   }
 
-  // Q/SQ time sheet (per-segment bests) — fuels late-Q3 drama detectors
-  if (isKnockoutMode(state) && (state.segment || 0) >= 1 && !state.chequered) {
-    updateSegmentTimeSheet(state, driver, timeSec, t || p.date_start || null, ln);
+  // Q/SQ time sheet (per-segment bests) — fuels late-Q3 / SQ3 drama detectors.
+  // Keep updating after Q3/SQ3 chequered so near-misses on out-laps still register.
+  if (isKnockoutMode(state) && (state.segment || 0) >= 1) {
+    const seg = state.segment || 0;
+    if (!state.chequered || seg >= 3) {
+      updateSegmentTimeSheet(
+        state,
+        driver,
+        timeSec,
+        t || p.date_start || null,
+        ln,
+      );
+    }
   }
 }
 
@@ -849,9 +859,10 @@ function updateSegmentTimeSheet(state, driver, timeSec, t, lap) {
   const gapToLeader =
     leader && row.rank > 1 ? row.timeSec - leader.timeSec : 0;
 
-  // Only stage drama for Q3/SQ3 (final segment)
+  // Only stage drama for Q3 / SQ3 (final knockout segment)
   if ((state.segment || 0) < 3) return;
 
+  // New name to P1 on the time sheet
   if (row.rank === 1 && (fromRank == null || fromRank !== 1)) {
     state._timeSheetDrama = {
       kind: "prov_p1",
@@ -865,7 +876,32 @@ function updateSegmentTimeSheet(state, driver, timeSec, t, lap) {
       top3: after.slice(0, 3),
       t: t || state.lastEventT,
     };
-  } else if (
+    return;
+  }
+
+  // Same driver already P1 scrubbing a big out-lap → real provisional pole time
+  if (row.rank === 1 && fromRank === 1 && prevBest) {
+    const gain = Number(prevBest.timeSec) - timeSec;
+    if (gain >= 3.0) {
+      state._timeSheetDrama = {
+        kind: "prov_p1",
+        driver,
+        timeSec,
+        fromRank: 1,
+        toRank: 1,
+        jumped: 0,
+        cleanedUp: true,
+        prevTimeSec: prevBest.timeSec,
+        prevLeader: driver,
+        prevLeaderTime: prevBest.timeSec,
+        top3: after.slice(0, 3),
+        t: t || state.lastEventT,
+      };
+      return;
+    }
+  }
+
+  if (
     row.rank >= 2 &&
     row.rank <= 3 &&
     gapToLeader <= 0.15 + 1e-9 &&
