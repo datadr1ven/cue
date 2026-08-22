@@ -1178,11 +1178,11 @@ function applyRaceControl(state, p, t) {
     state.lastRadioInterestT = t || state.lastEventT;
     return;
   }
+  // "VSC IN THIS LAP" / "SAFETY CAR IN THIS LAP" mean ending *soon*, not
+  // cleared yet — stay neutralised until ENDING or TRACK CLEAR / GREEN.
   if (
     msg.includes("VSC ENDING") ||
-    msg.includes("VSC IN THIS LAP") ||
-    msg.includes("VIRTUAL SAFETY CAR ENDING") ||
-    msg.includes("VIRTUAL SAFETY CAR IN THIS LAP")
+    msg.includes("VIRTUAL SAFETY CAR ENDING")
   ) {
     state.trackStatus = "green";
     state.lastOrderNoiseT = t || state.lastEventT; // restart silence after neutralisation
@@ -1203,10 +1203,8 @@ function applyRaceControl(state, p, t) {
     }
     return;
   }
-  if (
-    (msg.includes("SAFETY CAR IN") || msg.includes("SAFETY CAR ENDING")) &&
-    !msg.includes("VIRTUAL")
-  ) {
+  // Do not match "SAFETY CAR IN THIS LAP" (still under SC).
+  if (msg.includes("SAFETY CAR ENDING") && !msg.includes("VIRTUAL")) {
     state.trackStatus = "green";
     state.lastOrderNoiseT = t || state.lastEventT;
     return;

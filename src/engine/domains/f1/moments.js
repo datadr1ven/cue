@@ -388,18 +388,23 @@ function fromRaceControl(prev, next, p, t) {
     !up.includes("VSC") &&
     !up.includes("VIRTUAL")
   ) {
-    out.push({
-      id: `sc-deployed-${t}`,
-      type: "flag.safety_car",
-      severity: 9,
-      t,
-      data: {
-        message: msg,
-        leader: next.leader,
-        leaderName: next.leader != null ? driverLabel(next, next.leader) : null,
-        top3: topN(next, 3),
-      },
-    });
+    // Silverstone '26: after "SC IN THIS LAP" the feed re-broadcast
+    // "SAFETY CAR DEPLOYED" while still under SC — don't alert twice.
+    if (prev.trackStatus !== "safety_car") {
+      out.push({
+        id: `sc-deployed-${t}`,
+        type: "flag.safety_car",
+        severity: 9,
+        t,
+        data: {
+          message: msg,
+          leader: next.leader,
+          leaderName:
+            next.leader != null ? driverLabel(next, next.leader) : null,
+          top3: topN(next, 3),
+        },
+      });
+    }
   }
 
   // Rain risk / wet notes — allowed even before session start
