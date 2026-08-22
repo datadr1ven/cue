@@ -1144,6 +1144,9 @@ function applyRaceControl(state, p, t) {
   }
 
   if (flag.includes("CHEQUERED") || msg.includes("CHEQUERED")) {
+    // Capture neutralisation *before* overwriting trackStatus (Silverstone
+    // '26 finished behind the safety car).
+    const priorTrackStatus = state.trackStatus;
     state.trackStatus = "chequered";
     state.chequered = true;
     state.sessionActive = false;
@@ -1165,6 +1168,9 @@ function applyRaceControl(state, p, t) {
         msg: String(p.message || "CHEQUERED FLAG"),
         type: "session.chequered",
         severity: 9,
+        underSafetyCar: priorTrackStatus === "safety_car",
+        underVsc: priorTrackStatus === "vsc",
+        priorTrackStatus: priorTrackStatus || null,
       };
     }
 

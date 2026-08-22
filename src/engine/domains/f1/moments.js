@@ -152,6 +152,11 @@ export function detectF1Moments(prev, next, event) {
         e.type || "session.chequered",
         e.severity ?? 9,
         e.resolved,
+        {
+          underSafetyCar: Boolean(e.underSafetyCar),
+          underVsc: Boolean(e.underVsc),
+          priorTrackStatus: e.priorTrackStatus || null,
+        },
       ),
     );
   }
@@ -1202,6 +1207,11 @@ function buildRaceFinishMoment(state, t, msg, type, severity) {
     type,
     severity,
     resolveFinishOrder(state, 5),
+    {
+      underSafetyCar: state.trackStatus === "safety_car",
+      underVsc: state.trackStatus === "vsc",
+      priorTrackStatus: state.trackStatus || null,
+    },
   );
 }
 
@@ -1212,9 +1222,12 @@ function buildRaceFinishMomentFromResolved(
   type,
   severity,
   resolved,
+  flags = {},
 ) {
   const top5 = enrichOrder(state, resolved.rows);
   const winner = top5[0] || null;
+  const underSafetyCar = Boolean(flags.underSafetyCar);
+  const underVsc = Boolean(flags.underVsc);
   return {
     id: `${type}-${t}`,
     type,
@@ -1229,6 +1242,9 @@ function buildRaceFinishMomentFromResolved(
       leader: winner?.driver ?? state.leader,
       leaderName: winner?.name || null,
       label: phaseLabel(state),
+      trackStatus: flags.priorTrackStatus || state.trackStatus || null,
+      underSafetyCar,
+      underVsc,
       ...contextFields(state, phaseLabel(state)),
     },
   };

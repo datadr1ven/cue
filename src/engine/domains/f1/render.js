@@ -187,9 +187,11 @@ export function renderF1Moment(moment, state) {
         }
         return withHead(head, lines.join("\n"));
       }
-      const title = d.label
+      let title = d.label
         ? `🏁 ${d.label} · chequered`
         : "🏁 Chequered flag";
+      if (d.underSafetyCar) title += " · under safety car";
+      else if (d.underVsc) title += " · under VSC";
       return withHead(head, raceFinishLine(title, d));
     }
 
@@ -327,19 +329,25 @@ function finishLine(prefix, top5) {
  * @param {object} d
  */
 function raceFinishLine(prefix, d) {
+  let p = prefix;
+  // session.finished path also benefits from under-SC framing
+  if (!/under safety car|under VSC/.test(p)) {
+    if (d.underSafetyCar) p += " · under safety car";
+    else if (d.underVsc) p += " · under VSC";
+  }
   const top5 = d.top5;
   if (!Array.isArray(top5) || !top5.length) {
-    return prefix;
+    return p;
   }
   if (d.provisional && d.orderSource === "laps") {
     const line = top5.map((x) => x.name).join(" · ");
     const win = d.winnerName ? `Winner (provisional): ${d.winnerName}\n` : "";
-    return `${prefix}\n${win}${line}\n(from lap times · board incomplete)`;
+    return `${p}\n${win}${line}\n(from lap times · board incomplete)`;
   }
   if (d.provisional) {
-    return `${finishLine(`${prefix} (approx)`, top5)}`;
+    return `${finishLine(`${p} (approx)`, top5)}`;
   }
-  return finishLine(prefix, top5);
+  return finishLine(p, top5);
 }
 
 function formatLeader(d) {
