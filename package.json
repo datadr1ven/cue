@@ -38,6 +38,7 @@
     "worker:local:http": "MQTT_SOURCE=local DELIVERY_MODE=http node bin/worker.js",
     "capture": "MQTT_SOURCE=live node bin/capture.js",
     "capture:local": "MQTT_SOURCE=local node bin/capture.js",
+    "capture:signalr": "node bin/capture-signalr.js",
     "download": "node bin/download.js",
     "bot": "node bin/bot.js",
     "publish": "node bin/publish-ndjson.js",
@@ -56,6 +57,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@microsoft/signalr": "^8.0.29",
     "axios": "^1.6.0",
     "byline": "^5.0.0",
     "dotenv": "^17.3.1",
