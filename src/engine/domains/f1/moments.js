@@ -628,27 +628,42 @@ function fromRaceControl(prev, next, p, t) {
     )
   ) {
     if (sessionBegun) {
-      out.push({
-        id: `penalty-${t}-${msg.slice(0, 40)}`,
-        type: "penalty.time",
-        severity: 8,
-        t,
-        entities:
-          p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
-        data: { message: msg },
-      });
+      // "PENALTY SERVED" is paperwork after the interesting call
+      if (/\bPENALTY SERVED\b/.test(up)) {
+        /* drop */
+      } else {
+        const cars =
+          p.driver_number != null
+            ? [p.driver_number]
+            : extractCarNumbers(msg);
+        const sev = stewardSeverity(next, up, cars, "penalty");
+        if (sev >= 6) {
+          out.push({
+            id: `penalty-${t}-${msg.slice(0, 40)}`,
+            type: "penalty.time",
+            severity: sev,
+            t,
+            entities: cars,
+            data: { message: msg },
+          });
+        }
+      }
     }
   } else if (/UNDER INVESTIGATION|WILL BE INVESTIGATED/.test(up)) {
     if (sessionBegun) {
-      out.push({
-        id: `invest-${t}-${msg.slice(0, 40)}`,
-        type: "stewards.investigation",
-        severity: 7,
-        t,
-        entities:
-          p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg),
-        data: { message: msg },
-      });
+      const cars =
+        p.driver_number != null ? [p.driver_number] : extractCarNumbers(msg);
+      const sev = stewardSeverity(next, up, cars, "investigation");
+      if (sev >= 6) {
+        out.push({
+          id: `invest-${t}-${msg.slice(0, 40)}`,
+          type: "stewards.investigation",
+          severity: sev,
+          t,
+          entities: cars,
+          data: { message: msg },
+        });
+      }
     }
   }
 
@@ -875,8 +890,9 @@ function shouldEmitBigSwing(prev, next, num, oldPos, newPos, t) {
   if (places < BIG_SWING_PLACES) return false;
 
   // Pit / neutralisation cascades rewrite the board in seconds — not "swings".
+  // Sector yellow is also noisy (and was sticky before sector-CLEAR fix).
   const status = next.trackStatus || prev.trackStatus;
-  if (status && status !== "green" && status !== "yellow") return false;
+  if (status && status !== "green") return false;
 
   const tMs = toMs(t);
   if (tMs == null) return false;
@@ -1158,7 +1174,8 @@ function maybeProvisionalPoleChange(prev, next, t) {
 }
 
 /** OpenF1 rainfall bit flaps — don't re-alert more often than this. */
-const WEATHER_RAIN_COOLDOWN_MS = 15 * 60 * 1000;
+/** Rainfall bit flaps; Dutch GP had ~20m gaps — keep to ~2 alerts/race max. */
+const WEATHER_RAIN_COOLDOWN_MS = 40 * 60 * 1000;
 
 /**
  * Late Q3/SQ3 time-sheet: provisional P1 changes + close-but-no-cigar.
@@ -1260,6 +1277,9 @@ function fromTimeSheetDrama(prev, next, t) {
 }
 
 function fromWeather(prev, next, p, t) {
+  // Pre-grid drizzle isn't race drama
+  if (!next.sessionActive && !prev.sessionActive) return [];
+
   const prevR = Number(prev.weather?.rainfall);
   const nextR = Number(
     next.weather?.rainfall != null ? next.weather.rainfall : p.rainfall,
@@ -1396,6 +1416,44 @@ function extractCarNumbers(msg) {
   let m;
   while ((m = re.exec(msg))) nums.push(Number(m[1]));
   return nums;
+}
+
+/**
+ * Steward noise policy (Dutch GP): midfield yellow-flag paperwork flooded sev 7–8.
+ * Keep collisions / serious calls; demote or drop routine YF invest for backmarkers.
+ * @param {object} state
+ * @param {string} up uppercased message
+ * @param {number[]} cars
+ * @param {'penalty'|'investigation'} kind
+ */
+function stewardSeverity(state, up, cars, kind) {
+  const serious =
+    /\bCAUSING A COLLISION\b|\bCOLLISION\b|\bDANGEROUS\b|\bUNSAFE\b|\bFALSE START\b/.test(
+      up,
+    );
+  const afterRace = /\bAFTER THE RACE\b/.test(up);
+  let bestPos = null;
+  for (const c of cars || []) {
+    const pos = state.position?.[c];
+    if (pos == null) continue;
+    const n = Number(pos);
+    if (bestPos == null || n < bestPos) bestPos = n;
+  }
+  const front = bestPos != null && bestPos <= 10;
+
+  if (kind === "investigation") {
+    if (serious) return 7;
+    if (afterRace && !front) return 5; // below default floor
+    if (front) return 7;
+    // Midfield yellow-flag / pit-exit invest
+    return 5;
+  }
+
+  // penalty
+  if (serious) return 8;
+  if (front) return 8;
+  // Midfield drive-through / time penalty — note once at sev 6
+  return 6;
 }
 
 function formatLapTime(sec) {

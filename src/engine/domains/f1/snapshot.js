@@ -57,6 +57,13 @@ export function createF1State() {
     circuitShortName: null,
     sessionActive: false,
     trackStatus: null, // green | yellow | red | vsc | safety_car | chequered
+    /**
+     * Sector numbers currently under yellow / double yellow.
+     * Sector CLEAR must remove entries — a single stuck sector used to leave
+     * trackStatus=yellow for the rest of the race (Dutch GP '26 pits).
+     * @type {Record<number, true>}
+     */
+    yellowSectors: {},
     /** @type {SessionKind} */
     sessionKind: "unknown",
     /** Forced kind from pipeline config / env */
@@ -216,6 +223,7 @@ export function reduceF1(state, event, opts = {}) {
       ? [...state.compoundsSeen]
       : [],
     pendingPits: { ...(state.pendingPits || {}) },
+    yellowSectors: { ...(state.yellowSectors || {}) },
     _pitCombined: null,
     _timeSheetDrama: null,
     pendingRaceFinish: state.pendingRaceFinish
@@ -282,6 +290,7 @@ export function reduceF1(state, event, opts = {}) {
     next.lastWeatherRainAlertT = null;
     next.leader = null;
     next.trackStatus = null;
+    next.yellowSectors = {};
     next.sessionActive = false;
     next.chequered = false;
     next.chequeredCount = 0;
@@ -718,20 +727,41 @@ export function buildPitMoment(pit, opts = {}) {
   const num = Number(pit.driver);
   const compoundOn = opts.compoundOn ?? pit.compoundOn ?? null;
   const posIn = pit.positionIn;
+  const status = pit.trackStatus || null;
+  const underSc = status === "safety_car";
+  const underVsc = status === "vsc";
+  const underYellow = status === "yellow";
+  // Top-5 pit under SC is the defining strategy call (Silverstone HAM→RUS)
+  const underScPit = underSc && posIn != null && posIn <= 5;
+
+  // Sparse race desk (Dutch GP): green-flag stops outside the lead group are
+  // wallpaper. Keep top-5 always; under VSC/SC allow top-10; SC top-5 boosted.
+  if (!underSc && !underVsc && posIn != null && posIn > 5) {
+    return null;
+  }
+  if ((underSc || underVsc) && posIn != null && posIn > 10) {
+    return null;
+  }
+
   // Midfield pits stay sev 5 (below default floor 6); leaders/top 10 are 6–7
   let severity = 5;
   if (posIn != null && posIn <= 3) severity = 7;
   else if (posIn != null && posIn <= 10) severity = 6;
   if (opts.state && num === opts.state.leader) severity = 7;
-  // Top-5 pit under SC is the defining strategy call (Silverstone HAM→RUS)
-  const underScPit =
-    pit.trackStatus === "safety_car" && posIn != null && posIn <= 5;
   if (underScPit) severity = Math.max(severity, 8);
+  else if ((underSc || underVsc) && posIn != null && posIn <= 10) {
+    severity = Math.max(severity, 6);
+  }
 
   const name =
     opts.state != null
       ? driverLabel(opts.state, num)
       : pit.driverName || `Driver ${num}`;
+
+  // Only label under SC/VSC in the alert — sector yellow is too noisy/local
+  // to be worth a suffix once trackStatus is accurate.
+  const statusForRender =
+    underSc || underVsc ? status : status === "yellow" ? null : status;
 
   return {
     id: `pit-${num}-${pit.lap ?? pit.t}`,
@@ -748,7 +778,7 @@ export function buildPitMoment(pit, opts = {}) {
       compoundOff: pit.compoundOff || null,
       compoundOn: compoundOn || null,
       positionIn: posIn != null ? Number(posIn) : null,
-      trackStatus: pit.trackStatus,
+      trackStatus: statusForRender,
       underScPit,
       timedOut: Boolean(opts.timedOut),
     },
@@ -1238,6 +1268,7 @@ function applyRaceControl(state, p, t) {
     state.awaitingNextSegment = false;
     state.segmentStartT = t || state.lastEventT;
     state.trackStatus = "green";
+    state.yellowSectors = {};
     // Heartbeat silence clock starts at lights-out / restart
     state.lastOrderNoiseT = t || state.lastEventT;
     state.lastOrderPulseT = null;
@@ -1386,8 +1417,11 @@ function applyRaceControl(state, p, t) {
     !msg.includes("CHEQUERED")
   ) {
     state.trackStatus = "red";
+    state.yellowSectors = {};
     state.lastRadioInterestT = t || state.lastEventT;
-    flushPendingRetirement(state, t, "red");
+    // Red freezes the whole field mid-lap — incomplete-lap retirement is a
+    // false positive factory (Dutch GP: LAWSON tagged, VER actually out).
+    state.pendingRetirement = null;
     return;
   }
   if (flag === "GREEN" || msg === "TRACK CLEAR") {
@@ -1395,16 +1429,57 @@ function applyRaceControl(state, p, t) {
       const wasNeutral = ["vsc", "safety_car", "red", "yellow"].includes(
         state.trackStatus,
       );
+      state.yellowSectors = {};
       state.trackStatus = "green";
       if (wasNeutral) state.lastOrderNoiseT = t || state.lastEventT;
     }
     return;
   }
-  if (flag === "YELLOW" || msg.includes("YELLOW IN TRACK")) {
+
+  // Sector yellow / clear — track per-sector so CLEAR IN TRACK SECTOR N
+  // actually drops yellow (OpenF1 rarely sends a global green between them).
+  const sector =
+    p.sector != null && Number.isFinite(Number(p.sector))
+      ? Number(p.sector)
+      : extractSectorNumber(msg);
+  if (
+    flag === "YELLOW" ||
+    flag === "DOUBLE YELLOW" ||
+    /\bYELLOW IN TRACK\b/.test(msg) ||
+    /\bDOUBLE YELLOW IN TRACK\b/.test(msg)
+  ) {
+    if (sector != null) {
+      state.yellowSectors = { ...state.yellowSectors, [sector]: true };
+    }
     if (!["vsc", "safety_car", "red", "chequered"].includes(state.trackStatus)) {
       state.trackStatus = "yellow";
     }
+    return;
   }
+  if (
+    (flag === "CLEAR" || /\bCLEAR IN TRACK\b/.test(msg)) &&
+    msg !== "TRACK CLEAR"
+  ) {
+    if (sector != null && state.yellowSectors?.[sector]) {
+      const nextSecs = { ...state.yellowSectors };
+      delete nextSecs[sector];
+      state.yellowSectors = nextSecs;
+    }
+    if (!["vsc", "safety_car", "red", "chequered"].includes(state.trackStatus)) {
+      const stillYellow = Object.keys(state.yellowSectors || {}).length > 0;
+      const wasYellow = state.trackStatus === "yellow";
+      state.trackStatus = stillYellow ? "yellow" : "green";
+      if (wasYellow && !stillYellow) {
+        state.lastOrderNoiseT = t || state.lastEventT;
+      }
+    }
+  }
+}
+
+/** @param {string} msg */
+function extractSectorNumber(msg) {
+  const m = String(msg || "").match(/\bSECTOR\s+(\d+)\b/i);
+  return m ? Number(m[1]) : null;
 }
 
 function ensureFallbackDrivers(state) {
