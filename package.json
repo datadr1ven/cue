@@ -39,6 +39,7 @@
     "capture": "MQTT_SOURCE=live node bin/capture.js",
     "capture:local": "MQTT_SOURCE=local node bin/capture.js",
     "capture:signalr": "node bin/capture-signalr.js",
+    "worker:local:openf1": "MQTT_SOURCE=local MQTT_LOCAL_USERNAME=openf1 MQTT_LOCAL_PASSWORD=openf1 DELIVERY_MODE=log node bin/worker.js",
     "download": "node bin/download.js",
     "bot": "node bin/bot.js",
     "publish": "node bin/publish-ndjson.js",

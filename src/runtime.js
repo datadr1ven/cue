@@ -60,7 +60,7 @@ export function getRuntime() {
 
 export function getMqttOptions(runtime, token) {
   if (runtime.mqttSource === "local") {
-    return {
+    const opts = {
       host: config.mqttLocalHost,
       port: config.mqttLocalPort,
       protocol: "mqtt",
@@ -69,6 +69,11 @@ export function getMqttOptions(runtime, token) {
       connectTimeout: 30000,
       keepalive: 60,
     };
+    if (config.mqttLocalUsername) {
+      opts.username = config.mqttLocalUsername;
+      opts.password = config.mqttLocalPassword || "";
+    }
+    return opts;
   }
   return {
     host: "mqtt.openf1.org",

@@ -45,6 +45,9 @@ export const config = {
   openf1Password: process.env.OPENF1_PASSWORD || null,
   mqttLocalHost: process.env.MQTT_LOCAL_HOST || "localhost",
   mqttLocalPort: Number(process.env.MQTT_LOCAL_PORT || 1883),
+  /** Optional — required when local Mosquitto has allow_anonymous false */
+  mqttLocalUsername: process.env.MQTT_LOCAL_USERNAME || null,
+  mqttLocalPassword: process.env.MQTT_LOCAL_PASSWORD || null,
   usersFile:
     process.env.USERS_FILE ||
     join(__dirname, "..", "data", "users.json"),

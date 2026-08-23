@@ -1,0 +1,86 @@
+# Local OpenF1 stack for Cue experiments:
+#   F1 SignalR → OpenF1 ingest → MQTT (v1/*) → Cue MQTT_SOURCE=local
+#
+# Setup:
+#   ./clone-openf1.sh
+#   cp .env.example .env   # set F1_TOKEN=
+#   docker compose up -d mongo mqtt api
+#   docker compose up ingest-realtime   # foreground OK to watch logs
+#
+# Then in Cue repo root:
+#   MQTT_SOURCE=local MQTT_LOCAL_USERNAME=openf1 MQTT_LOCAL_PASSWORD=openf1 \
+#     DELIVERY_MODE=log ENGINE_SESSION_KIND=race npm run worker
+#
+# Optional paid-OpenF1 safety net in another terminal (unchanged):
+#   MQTT_SOURCE=live DELIVERY_MODE=http … npm run worker
+
+name: openf1-local
+
+services:
+  mongo:
+    image: mongo:8
+    volumes:
+      - mongo-data:/data/db
+    # Uncomment to inspect with Compass / mongosh on the host:
+    # ports:
+    #   - "27017:27017"
+
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    ports:
+      - "1883:1883"
+    volumes:
+      - mqtt-data:/mosquitto/data
+      - ./mqtt-config:/mosquitto/config:ro
+
+  api:
+    build:
+      context: ./openf1
+    ports:
+      - "8000:8000"
+    environment:
+      MONGO_CONNECTION_STRING: mongodb://mongo:27017
+      ROLE: api
+      OPENF1_BASE_URL: http://api:8000/
+    depends_on:
+      - mongo
+      - mqtt
+
+  ingest-realtime:
+    build:
+      context: ./openf1
+    env_file:
+      - .env
+    environment:
+      MONGO_CONNECTION_STRING: mongodb://mongo:27017
+      ROLE: ingest-realtime
+      OPENF1_MQTT_URL: mqtt
+      OPENF1_MQTT_PORT: 1883
+      OPENF1_MQTT_USERNAME: ${OPENF1_MQTT_USERNAME:-openf1}
+      OPENF1_MQTT_PASSWORD: ${OPENF1_MQTT_PASSWORD:-openf1}
+      OPENF1_MQTT_NO_TLS: "true"
+      OPENF1_BASE_URL: http://api:8000/
+      # Passed through to fastf1_livetiming --auth when set
+      F1_TOKEN: ${F1_TOKEN:-}
+    depends_on:
+      - api
+      - mqtt
+      - mongo
+
+  # One-shot season backfill (heavy). Enable when you want local REST history:
+  #   docker compose --profile backfill up ingest-historical
+  ingest-historical:
+    profiles: ["backfill"]
+    build:
+      context: ./openf1
+    environment:
+      MONGO_CONNECTION_STRING: mongodb://mongo:27017
+      ROLE: ingest-historical
+      OPENF1_BASE_URL: http://api:8000/
+    depends_on:
+      - api
+      - mongo
+
+volumes:
+  mongo-data:
+  mqtt-data:

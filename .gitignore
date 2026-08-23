@@ -3,6 +3,9 @@ node_modules/
 data/users.json
 *.log
 captures/
+# Local OpenF1 experiment stack (clone + secrets)
+openf1-local/openf1/
+openf1-local/.env
 .DS_Store
 .idea/
 .vscode/
