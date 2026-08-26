@@ -29,6 +29,11 @@ export const LAUNCH_ACTIONS = [
   { id: "ses1", key: "j", label: "SES-1 (2nd stage start)", phase: "ascent", severity: 7, scriptTPlusSec: null, group: "ascent" },
   { id: "fairing", key: "f", label: "Fairing separation", phase: "ascent", severity: 6, scriptTPlusSec: null, group: "ascent" },
 
+  // Falcon Heavy side boosters (dual RTLS)
+  { id: "side_beco", key: "y", label: "Side booster engine cutoff (BECO)", phase: "ascent", severity: 7, scriptTPlusSec: null, group: "fh" },
+  { id: "side_sep", key: "Y", label: "Side boosters separate", phase: "ascent", severity: 8, scriptTPlusSec: null, group: "fh" },
+  { id: "side_flip", key: "F", label: "Side boosters flip", phase: "booster", severity: 6, scriptTPlusSec: null, group: "fh" },
+
   // Booster / first stage
   { id: "boostback_start", key: "4", label: "Boostback burn start", phase: "booster", severity: 7, scriptTPlusSec: null, group: "booster" },
   { id: "boostback_end", key: "5", label: "Boostback end", phase: "booster", severity: 6, scriptTPlusSec: null, group: "booster" },
