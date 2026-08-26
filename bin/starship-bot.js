@@ -107,7 +107,8 @@ function userHelp() {
   return (
     `TPlus — sparse SpaceX launch alerts\n\n` +
     `/missions — list missions\n` +
-    `/mission <n|id> — browse nominal T+\n` +
+    `/mission — active mission timeline\n` +
+    `/mission <id|n> — browse nominal T+\n` +
     `/eta — countdown to NET\n` +
     `/status — flight clock (if live)\n` +
     `/help — this message\n\n` +
@@ -192,7 +193,9 @@ bot.command("missions", async (ctx) => {
     return;
   }
   const list = session.formatMissionList();
-  await ctx.reply(`Missions (* = default)\n${list}\n\n/mission <n> to browse`);
+  await ctx.reply(
+    `Missions (* = default)\n${list}\n\n/mission — active timeline\n/mission <id|n> — browse\n/mission use <id|n> — switch (admin)`,
+  );
 });
 
 bot.command("mission", async (ctx) => {
@@ -204,12 +207,9 @@ bot.command("mission", async (ctx) => {
     .replace(/^\/mission(@\w+)?\s*/i, "")
     .trim();
   if (!raw) {
-    const st = session.status();
-    await ctx.reply(
-      `Active: ${st.missionName || "—"}\n` +
-        `/mission <n> to browse` +
-        (isAdmin(ctx.from.id) ? ` · /mission use <n> to switch ops` : ""),
-    );
+    // Bare /mission → active mission nominal timeline
+    const text = session.formatTimeline(null);
+    await ctx.reply(text.length > 3500 ? text.slice(0, 3500) + "\n…" : text);
     return;
   }
   if (raw.toLowerCase().startsWith("use ")) {

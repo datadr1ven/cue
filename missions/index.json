@@ -3,7 +3,6 @@
   "missions": [
     {
       "id": "roman-fh",
-      "number": 1,
       "label": "Roman Space Telescope (FH)",
       "file": "flights/roman-fh-script.json"
     },

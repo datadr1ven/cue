@@ -277,10 +277,16 @@ export function createStarshipSession(opts = {}) {
 
   function formatMissionList() {
     return listMissionsFn()
-      .map(
-        (m) =>
-          `${m.isDefault ? "*" : " "} ${m.number ?? "—"}  ${m.label || m.id}`,
-      )
+      .map((m) => {
+        const mark = m.isDefault ? "*" : " ";
+        const num =
+          m.number != null && Number.isFinite(Number(m.number))
+            ? String(m.number)
+            : null;
+        // Always show id so /mission <id> works when there is no flight number
+        const ref = num != null ? `${num} · ${m.id}` : m.id;
+        return `${mark} ${ref}  ${m.label || m.id}`;
+      })
       .join("\n");
   }
 

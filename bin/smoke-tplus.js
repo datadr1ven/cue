@@ -12,6 +12,11 @@ import {
   formatEta,
   MISSIONS_ROOT,
 } from "../src/missions/registry.js";
+import {
+  bundledListMissions,
+  bundledLoadMission,
+  bundledIndex,
+} from "../src/missions/bundle.js";
 import { createStarshipSession } from "../src/starship-session-node.js";
 
 function assert(cond, msg) {
@@ -24,13 +29,37 @@ console.log("✓ mission registry validates");
 
 const list = listMissions();
 assert(list.length >= 2, "expected at least 2 missions");
-console.log(`✓ listMissions: ${list.map((m) => m.number).join(", ")}`);
+console.log(
+  `✓ listMissions: ${list.map((m) => m.id || m.number).join(", ")}`,
+);
 
 const m12 = loadMission(12);
 assert(m12?.doc?.missionId === "starship-flight-12", "load 12");
 const m13 = loadMission(13);
 assert(m13?.doc?.missionId === "starship-flight-13", "load 13");
-console.log("✓ load by number");
+const mRoman = loadMission("roman-fh");
+assert(mRoman?.doc?.missionId === "roman-fh", "load roman-fh from filesystem");
+console.log("✓ load by number / id");
+
+// CF Worker path: every index entry must resolve through the in-bundle DOCS map
+const bundled = bundledListMissions();
+assert(bundled.length === list.length, "bundle list length matches registry");
+for (const entry of bundled) {
+  const loaded = bundledLoadMission(entry.id);
+  assert(
+    loaded?.doc?.missionId === entry.id,
+    `bundle missing mission doc for ${entry.id} — import it in src/missions/bundle.js`,
+  );
+}
+assert(
+  bundledIndex.defaultMissionId === "roman-fh",
+  "defaultMissionId should be roman-fh",
+);
+const bareDefault = bundledLoadMission("default");
+assert(bareDefault?.doc?.missionId === "roman-fh", "bundle default → roman-fh");
+const romanTimeline = bareDefault.doc.script?.some((r) => r.actionId === "liftoff");
+assert(romanTimeline, "roman script has liftoff");
+console.log("✓ CF bundle loads every indexed mission (incl. roman-fh)");
 
 const session = createStarshipSession({
   missionRef: 13,

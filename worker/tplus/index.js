@@ -298,7 +298,8 @@ function userHelp() {
   return (
     `TPlus — sparse SpaceX launch alerts\n\n` +
     `/missions — list missions\n` +
-    `/mission <n|id> — browse nominal T+\n` +
+    `/mission — active mission timeline\n` +
+    `/mission <id|n> — browse nominal T+\n` +
     `/eta — countdown to NET\n` +
     `/status — flight clock\n` +
     `/help — this message\n\n` +
@@ -314,7 +315,7 @@ function opsHelp() {
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/hype <hours>\n` +
-    `/mission use <n>\n` +
+    `/mission use <id|n> — switch active mission\n` +
     `/inbox — read free-text messages from users\n` +
     `/inbox clear — wipe inbox\n` +
     `/reply last <text> — DM the last inbox user\n` +
@@ -414,7 +415,10 @@ async function handleMessage(env, kv, message) {
     await reply(
       env,
       chatId,
-      `Missions (* = default)\n${session.formatMissionList()}\n\n/mission <n> to browse`,
+      `Missions (* = default)\n${session.formatMissionList()}\n\n` +
+        `/mission — active timeline\n` +
+        `/mission <id|n> — browse\n` +
+        `/mission use <id|n> — switch (admin)`,
     );
     return;
   }
@@ -422,12 +426,12 @@ async function handleMessage(env, kv, message) {
   if (text.startsWith("/mission")) {
     const raw = stripCmd(text, "mission");
     if (!raw) {
-      const st = session.status();
+      // Bare /mission → active mission nominal timeline
+      const body = session.formatTimeline(null);
       await reply(
         env,
         chatId,
-        `Active: ${st.missionName || "—"}\n/mission <n> to browse` +
-          (admin ? " · /mission use <n> for ops" : ""),
+        body.length > 3500 ? body.slice(0, 3500) + "\n…" : body,
       );
       return;
     }
