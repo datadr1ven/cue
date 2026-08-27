@@ -24,6 +24,7 @@ on:
       - "worker/tplus/**"
       - "wrangler.toml"
       - "src/tplus-commands.js"
+      - "src/telegram-inbox.js"
       - "src/starship-session.js"
       # Missions (git timelines + worker bundle)
       - "src/missions/**"

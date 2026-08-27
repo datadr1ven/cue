@@ -177,3 +177,99 @@ export function formatInboxList(inbox, opts = {}) {
 /** Short user-facing ack (not a promise of a reply). */
 export const INBOX_USER_ACK =
   "Got it — noted for the operator. For bot help use /help.";
+
+/** Coalesce state for admin inbox pings (separate from message list). */
+export const INBOX_NOTIFY_KV_KEY = "inbox:notify:v1";
+/** Quiet window after an admin ping before another digest may fire. */
+export const INBOX_NOTIFY_COALESCE_MS = 10 * 60 * 1000;
+/** Preview length in admin notify DMs. */
+export const INBOX_NOTIFY_PREVIEW = 200;
+
+/**
+ * @param {object} [data]
+ * @returns {{ lastNotifyAt: number|null, pendingCount: number }}
+ */
+export function normalizeNotifyState(data) {
+  const last =
+    data?.lastNotifyAt != null && Number.isFinite(Number(data.lastNotifyAt))
+      ? Number(data.lastNotifyAt)
+      : null;
+  const pending = Number(data?.pendingCount);
+  return {
+    lastNotifyAt: last,
+    pendingCount: Number.isFinite(pending) && pending > 0 ? Math.floor(pending) : 0,
+  };
+}
+
+/**
+ * Decide whether to DM admins for a newly captured inbox entry.
+ * Digest coalesce: first message after the quiet window pings immediately;
+ * further messages only bump pendingCount until the window elapses.
+ *
+ * @param {object} [state]
+ * @param {{ now?: number, coalesceMs?: number }} [opts]
+ * @returns {{ shouldNotify: boolean, nextState: { lastNotifyAt: number|null, pendingCount: number }, batchedCount: number }}
+ */
+export function decideInboxNotify(state, opts = {}) {
+  const now = opts.now != null ? Number(opts.now) : Date.now();
+  const coalesceMs =
+    opts.coalesceMs != null ? Number(opts.coalesceMs) : INBOX_NOTIFY_COALESCE_MS;
+  const cur = normalizeNotifyState(state);
+  const quietOk =
+    cur.lastNotifyAt == null || now - cur.lastNotifyAt >= coalesceMs;
+
+  if (quietOk) {
+    const batchedCount = cur.pendingCount + 1;
+    return {
+      shouldNotify: true,
+      batchedCount,
+      nextState: { lastNotifyAt: now, pendingCount: 0 },
+    };
+  }
+
+  return {
+    shouldNotify: false,
+    batchedCount: 0,
+    nextState: {
+      lastNotifyAt: cur.lastNotifyAt,
+      pendingCount: cur.pendingCount + 1,
+    },
+  };
+}
+
+/**
+ * After admin /inbox (read or clear): drop pending so a later digest
+ * doesn't re-count messages they already opened. Keep lastNotifyAt.
+ *
+ * @param {object} [state]
+ */
+export function clearInboxNotifyPending(state) {
+  const cur = normalizeNotifyState(state);
+  return { lastNotifyAt: cur.lastNotifyAt, pendingCount: 0 };
+}
+
+/**
+ * @param {{ entry: object, batchedCount?: number, previewMax?: number }} opts
+ */
+export function formatInboxNotify(opts) {
+  const entry = opts.entry || {};
+  const batched = Math.max(1, Number(opts.batchedCount) || 1);
+  const max = opts.previewMax ?? INBOX_NOTIFY_PREVIEW;
+  const who = formatSender(entry);
+  const idHint = entry.userId != null ? ` · id:${entry.userId}` : "";
+  const kind = entry.kind && entry.kind !== "text" ? ` [${entry.kind}]` : "";
+  let preview = String(entry.text || "(empty)");
+  if (preview.length > max) preview = preview.slice(0, max - 1) + "…";
+
+  const lines =
+    batched <= 1
+      ? [`📬 Inbox · ${who}${idHint}${kind}`, preview, "", "/inbox · /reply last <text>"]
+      : [
+          `📬 Inbox · ${batched} new since last ping`,
+          `latest · ${who}${idHint}${kind}`,
+          preview,
+          "",
+          "/inbox · /reply last <text>",
+        ];
+  return lines.join("\n");
+}

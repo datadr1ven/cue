@@ -18,6 +18,7 @@ import {
   bundledIndex,
 } from "../src/missions/bundle.js";
 import { createStarshipSession } from "../src/starship-session-node.js";
+import "./smoke-inbox.js";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);

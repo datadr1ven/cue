@@ -28,11 +28,16 @@ import {
 } from "../../src/tplus-commands.js";
 import {
   INBOX_KV_KEY,
+  INBOX_NOTIFY_KV_KEY,
   INBOX_USER_ACK,
   appendInbox,
+  clearInboxNotifyPending,
+  decideInboxNotify,
   formatInboxList,
+  formatInboxNotify,
   inboxEntryFromMessage,
   normalizeInbox,
+  normalizeNotifyState,
   parseReplyArgs,
   resolveInboxTarget,
 } from "../../src/telegram-inbox.js";
@@ -94,6 +99,44 @@ async function loadInbox(kv) {
 
 async function saveInbox(kv, inbox) {
   await kvPutJson(kv, INBOX_KV_KEY, normalizeInbox(inbox));
+}
+
+async function loadNotifyState(kv) {
+  return normalizeNotifyState(
+    await kvGetJson(kv, INBOX_NOTIFY_KV_KEY, null),
+  );
+}
+
+async function saveNotifyState(kv, state) {
+  await kvPutJson(kv, INBOX_NOTIFY_KV_KEY, normalizeNotifyState(state));
+}
+
+/** Admin opened /inbox — drop pending digest count. */
+async function markInboxSeen(kv) {
+  const next = clearInboxNotifyPending(await loadNotifyState(kv));
+  await saveNotifyState(kv, next);
+}
+
+/**
+ * Digest-coalesce admin DM after a user inbox capture.
+ * Skips when the sender is an admin (no self-ping).
+ */
+async function maybeNotifyAdmins(env, kv, entry, { adminSender = false } = {}) {
+  if (!entry || adminSender) return;
+  const admins = parseAdminIds(env);
+  if (!admins.length) return;
+
+  const decision = decideInboxNotify(await loadNotifyState(kv));
+  await saveNotifyState(kv, decision.nextState);
+  if (!decision.shouldNotify) return;
+
+  const text = formatInboxNotify({
+    entry,
+    batchedCount: decision.batchedCount,
+  });
+  for (const id of admins) {
+    await reply(env, id, text);
+  }
 }
 
 /** Store free-text / unlabeled photo; silent if nothing to store. */
@@ -319,7 +362,8 @@ function opsHelp() {
     `/inbox — read free-text messages from users\n` +
     `/inbox clear — wipe inbox\n` +
     `/reply last <text> — DM the last inbox user\n` +
-    `/reply <userId|@user> <text> — DM that user`
+    `/reply <userId|@user> <text> — DM that user\n` +
+    `(new inbox messages ping admins; batched ~10m)`
   );
 }
 
@@ -343,7 +387,7 @@ async function handleMessage(env, kv, message) {
 
   // Photo with caption /note … or /broadcast … (or inbox if unlabeled free-text)
   if (photoFileId && !text.startsWith("/")) {
-    await captureToInbox(kv, message, {
+    const entry = await captureToInbox(kv, message, {
       text: text || "(photo, no caption)",
       kind: "photo",
     });
@@ -354,6 +398,7 @@ async function handleMessage(env, kv, message) {
         "Photo saved to /inbox.\nTo fan out to subscribers, caption with:\n/note your text\nor\n/broadcast your text",
       );
     } else {
+      await maybeNotifyAdmins(env, kv, entry, { adminSender: false });
       await reply(env, chatId, INBOX_USER_ACK);
     }
     return;
@@ -382,7 +427,8 @@ async function handleMessage(env, kv, message) {
   // Free-text (not a command) → KV inbox for ops
   if (!text.startsWith("/")) {
     if (!text.trim()) return;
-    await captureToInbox(kv, message, { text, kind: "text" });
+    const entry = await captureToInbox(kv, message, { text, kind: "text" });
+    await maybeNotifyAdmins(env, kv, entry, { adminSender: admin });
     await reply(env, chatId, INBOX_USER_ACK);
     return;
   }
@@ -555,9 +601,11 @@ async function handleMessage(env, kv, message) {
     const raw = stripCmd(text, "inbox").toLowerCase();
     if (raw === "clear" || raw === "wipe" || raw === "empty") {
       await saveInbox(kv, { messages: [] });
+      await markInboxSeen(kv);
       await reply(env, chatId, "Inbox cleared.");
       return;
     }
+    await markInboxSeen(kv);
     const body = formatInboxList(await loadInbox(kv));
     await reply(
       env,

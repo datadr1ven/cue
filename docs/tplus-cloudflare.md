@@ -13,6 +13,7 @@ Subscribers and session state live in **KV**. Mission timelines (Starship, Falco
 | Subscribers | KV key `users:v1` (not local `data/users.json`) |
 | Active mission / T+ clock | KV key `session:v1` |
 | Free-text from users | KV key `inbox:v1` (admin `/inbox` / `/reply`) |
+| Admin inbox pings | KV `inbox:notify:v1` — digest coalesce (~10m quiet window) |
 | New mission timelines | Commit JSON → `npm run validate:missions` → deploy |
 
 Not for OpenF1 MQTT (use a small VPS for GridWhisper/F1 if needed).

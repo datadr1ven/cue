@@ -10,8 +10,9 @@ No user prefs in v1 — everyone gets the same sparse moments.
 ```
 Telegram users
     │  /start /stop /help /status
+    │  free-text → inbox (admin /inbox /reply)
     ▼
-CF Worker (gridwhisper) ── KV users:v1
+CF Worker (gridwhisper) ── KV users:v1 · inbox:v1 · inbox:notify:v1
     ▲
     │  POST /deliver  (Bearer DELIVER_SECRET)
     │
@@ -21,6 +22,19 @@ Laptop (quali / race)
 
 TPlus stays a separate worker (`wrangler.toml` / `tplus`).
 
+### Admin inbox
+
+Same shared module as TPlus (`src/telegram-inbox.js`):
+
+| Concern | Behavior |
+|---------|----------|
+| User free-text / unlabeled photo | Stored in KV `inbox:v1`; user gets a short ack |
+| Admin read | `/inbox` · `/inbox clear` · `/reply last\|id\|@user …` |
+| Admin ping | Digest coalesce (~10m): first new message DMs admins; further messages batch until the quiet window ends |
+| Notify state | KV `inbox:notify:v1` |
+
+Requires `TELEGRAM_ADMIN_IDS`. Inbox commands stay off the public `/` menu (like `/note`).
+
 ## Autodeploy (GitHub Actions)
 
 Workflow [`.github/workflows/deploy-gridwhisper.yml`](../.github/workflows/deploy-gridwhisper.yml) deploys on push to `main` when the **Worker surface** changes:
@@ -28,6 +42,7 @@ Workflow [`.github/workflows/deploy-gridwhisper.yml`](../.github/workflows/deplo
 - `worker/gridwhisper/**`
 - `wrangler.gridwhisper.toml`
 - `src/gridwhisper-commands.js`
+- `src/telegram-inbox.js`
 - `package.json` / lockfile / the workflow itself
 
 Uses the same GitHub secrets as TPlus: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.

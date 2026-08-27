@@ -173,7 +173,7 @@ TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id DELIVERY_MODE=telegram npm run sta
 | `/broadcast <text>` | Announcement |
 | photo + caption `/note …` or `/broadcast …` | Same as above, with image (admin) |
 | `/hype <hours>` | HITL lead-up template (e.g. 48) |
-| `/inbox` · `/reply …` | Admin: free-text inbox + DM reply |
+| `/inbox` · `/reply …` | Admin: free-text inbox + DM reply (admins get batched pings ~10m) |
 
 The Telegram **/** menu lists user commands only (`start`, `help`, `missions`, `mission`, `eta`, `status`). Ops commands stay off the public menu.
 
@@ -300,6 +300,8 @@ Workflow [`.github/workflows/deploy-gridwhisper.yml`](./.github/workflows/deploy
 |---------|------|
 | `/start` · `/stop` | Subscribe / unsubscribe |
 | `/status` · `/help` | Enrollment check · how it works |
+| `/note` · `/broadcast` | Admin fan-out to subscribers |
+| `/inbox` · `/reply …` | Admin: free-text inbox + DM reply (batched admin pings ~10m) |
 | `POST /deliver` | Trusted race-day inject (Bearer `DELIVER_SECRET`) |
 
 Race day on a laptop (MQTT → Cue → Worker fan-out):

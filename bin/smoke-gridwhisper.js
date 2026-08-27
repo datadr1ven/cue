@@ -3,6 +3,11 @@
  * Offline smoke for GridWhisper product surface (no Telegram / CF).
  */
 import { GRIDWHISPER_USER_COMMANDS } from "../src/gridwhisper-commands.js";
+import "./smoke-inbox.js";
+import {
+  INBOX_USER_ACK,
+  formatInboxNotify,
+} from "../src/telegram-inbox.js";
 
 function assert(cond, msg) {
   if (!cond) {
@@ -21,7 +26,15 @@ assert(
   GRIDWHISPER_USER_COMMANDS.every((c) => c.description && c.command),
   "each command has description",
 );
-assert(cmds.length === 4, "exactly 4 user commands (no prefs)");
+assert(cmds.length === 4, "exactly 4 user commands (no prefs; inbox is admin-only)");
+assert(INBOX_USER_ACK.length > 10, "inbox user ack present");
+assert(
+  formatInboxNotify({
+    entry: { username: "x", userId: 1, text: "hi" },
+    batchedCount: 1,
+  }).includes("/inbox"),
+  "inbox notify mentions /inbox",
+);
 
 const { deliverHttp, applyAlertTag } = await import("../src/delivery.js");
 

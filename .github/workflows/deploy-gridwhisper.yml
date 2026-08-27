@@ -24,6 +24,7 @@ on:
       - "worker/gridwhisper/**"
       - "wrangler.gridwhisper.toml"
       - "src/gridwhisper-commands.js"
+      - "src/telegram-inbox.js"
       # Shared delivery helper used only if Worker later imports it — keep for safety if we wire it
       # (currently Worker is self-contained; package.json covers tooling)
       # Tooling / deps

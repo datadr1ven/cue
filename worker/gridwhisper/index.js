@@ -2,7 +2,8 @@
  * Cloudflare Worker — GridWhisper Telegram (enroll + deliver).
  *
  * Always-on surface: webhook for /start · /help · /status · /stop.
- * Admins (TELEGRAM_ADMIN_IDS): /note · /broadcast
+ * Admins (TELEGRAM_ADMIN_IDS): /note · /broadcast · /inbox · /reply
+ * Free-text from users → KV inbox (digest-coalesce admin ping).
  * Race-day MQTT (laptop) POSTs alerts to POST /deliver; this worker fans out.
  *
  * Bindings (wrangler.gridwhisper.toml):
@@ -10,13 +11,28 @@
  * Secrets:
  *   TELEGRAM_TOKEN
  *   DELIVER_SECRET        (Bearer for /deliver)
- *   TELEGRAM_ADMIN_IDS    (comma-separated; required for /note /broadcast)
+ *   TELEGRAM_ADMIN_IDS    (comma-separated; required for ops)
  * Vars:
  *   ENROLL_OPEN=true
  *   WEBHOOK_SECRET        (optional path secret)
  */
 
 import { GRIDWHISPER_USER_COMMANDS } from "../../src/gridwhisper-commands.js";
+import {
+  INBOX_KV_KEY,
+  INBOX_NOTIFY_KV_KEY,
+  INBOX_USER_ACK,
+  appendInbox,
+  clearInboxNotifyPending,
+  decideInboxNotify,
+  formatInboxList,
+  formatInboxNotify,
+  inboxEntryFromMessage,
+  normalizeInbox,
+  normalizeNotifyState,
+  parseReplyArgs,
+  resolveInboxTarget,
+} from "../../src/telegram-inbox.js";
 
 const KV_USERS = "users:v1";
 
@@ -170,7 +186,12 @@ function helpText(admin = false) {
     s +=
       `\n\nOps (admin)\n` +
       `/note <text> — freeform alert to all subscribers\n` +
-      `/broadcast <text> — announcement to all subscribers`;
+      `/broadcast <text> — announcement to all subscribers\n` +
+      `/inbox — read free-text messages from users\n` +
+      `/inbox clear — wipe inbox\n` +
+      `/reply last <text> — DM the last inbox user\n` +
+      `/reply <userId|@user> <text> — DM that user\n` +
+      `(new inbox messages ping admins; batched ~10m)`;
   }
   return s;
 }
@@ -180,12 +201,103 @@ function stripCmd(text, name) {
   return text.replace(re, "").trim();
 }
 
+/** Command line from text message or photo caption. */
+function cmdText(message) {
+  return (message?.text || message?.caption || "").trim();
+}
+
+function largestPhotoFileId(message) {
+  const photos = message?.photo;
+  if (!Array.isArray(photos) || photos.length === 0) return null;
+  return photos[photos.length - 1]?.file_id || null;
+}
+
+async function loadInbox(kv) {
+  return normalizeInbox(await kvGetJson(kv, INBOX_KV_KEY, { messages: [] }));
+}
+
+async function saveInbox(kv, inbox) {
+  await kvPutJson(kv, INBOX_KV_KEY, normalizeInbox(inbox));
+}
+
+async function loadNotifyState(kv) {
+  return normalizeNotifyState(
+    await kvGetJson(kv, INBOX_NOTIFY_KV_KEY, null),
+  );
+}
+
+async function saveNotifyState(kv, state) {
+  await kvPutJson(kv, INBOX_NOTIFY_KV_KEY, normalizeNotifyState(state));
+}
+
+async function markInboxSeen(kv) {
+  const next = clearInboxNotifyPending(await loadNotifyState(kv));
+  await saveNotifyState(kv, next);
+}
+
+async function maybeNotifyAdmins(env, kv, entry, { adminSender = false } = {}) {
+  if (!entry || adminSender) return;
+  const admins = parseAdminIds(env);
+  if (!admins.length) return;
+
+  const decision = decideInboxNotify(await loadNotifyState(kv));
+  await saveNotifyState(kv, decision.nextState);
+  if (!decision.shouldNotify) return;
+
+  const text = formatInboxNotify({
+    entry,
+    batchedCount: decision.batchedCount,
+  });
+  for (const id of admins) {
+    await reply(env, id, text);
+  }
+}
+
+async function captureToInbox(kv, message, extra = {}) {
+  const entry = inboxEntryFromMessage(message, extra);
+  if (!entry.text && entry.kind === "text") return null;
+  if (!entry.text && entry.kind === "photo") {
+    entry.text = "(photo, no caption)";
+  }
+  const next = appendInbox(await loadInbox(kv), entry);
+  await saveInbox(kv, next);
+  return entry;
+}
+
 async function handleMessage(env, kv, message) {
   const chatId = message.chat.id;
   const userId = message.from?.id;
-  const text = (message?.text || "").trim();
-  if (!text.startsWith("/")) return;
+  const text = cmdText(message);
+  const photoFileId = largestPhotoFileId(message);
   const admin = isAdmin(env, userId);
+
+  // Unlabeled photo → inbox
+  if (photoFileId && !text.startsWith("/")) {
+    const entry = await captureToInbox(kv, message, {
+      text: text || "(photo, no caption)",
+      kind: "photo",
+    });
+    if (admin) {
+      await reply(
+        env,
+        chatId,
+        "Photo saved to /inbox.\nTo fan out to subscribers, caption with:\n/note your text\nor\n/broadcast your text",
+      );
+    } else {
+      await maybeNotifyAdmins(env, kv, entry, { adminSender: false });
+      await reply(env, chatId, INBOX_USER_ACK);
+    }
+    return;
+  }
+
+  // Free-text (not a command) → KV inbox for ops
+  if (!text.startsWith("/")) {
+    if (!text.trim()) return;
+    const entry = await captureToInbox(kv, message, { text, kind: "text" });
+    await maybeNotifyAdmins(env, kv, entry, { adminSender: admin });
+    await reply(env, chatId, INBOX_USER_ACK);
+    return;
+  }
 
   if (text.startsWith("/start")) {
     if (!canEnroll(env, userId)) {
@@ -253,7 +365,7 @@ async function handleMessage(env, kv, message) {
     }
     const kind = text.startsWith("/note") ? "note" : "broadcast";
     const body = stripCmd(text, kind);
-    if (!body) {
+    if (!body && !photoFileId) {
       await reply(
         env,
         chatId,
@@ -264,14 +376,86 @@ async function handleMessage(env, kv, message) {
       return;
     }
     const alertText =
-      kind === "note" ? `📝 ${body}` : `📢 ${body}`;
-    const { n, total } = await fanOut(env, kv, alertText);
+      kind === "note"
+        ? body
+          ? `📝 ${body}`
+          : "📝"
+        : body
+          ? `📢 ${body}`
+          : "📢";
+    const { n, total } = await fanOut(env, kv, alertText, { photoFileId });
     await reply(
       env,
       chatId,
       kind === "note"
         ? `Note sent to ${n}/${total} subscriber(s).`
         : `Broadcast sent to ${n}/${total} subscriber(s).`,
+    );
+    return;
+  }
+
+  if (text.startsWith("/inbox")) {
+    if (!admin) {
+      await reply(env, chatId, "Admin only.");
+      return;
+    }
+    const raw = stripCmd(text, "inbox").toLowerCase();
+    if (raw === "clear" || raw === "wipe" || raw === "empty") {
+      await saveInbox(kv, { messages: [] });
+      await markInboxSeen(kv);
+      await reply(env, chatId, "Inbox cleared.");
+      return;
+    }
+    await markInboxSeen(kv);
+    const body = formatInboxList(await loadInbox(kv));
+    await reply(
+      env,
+      chatId,
+      body.length > 3900 ? body.slice(0, 3900) + "\n…" : body,
+    );
+    return;
+  }
+
+  if (text.startsWith("/reply")) {
+    if (!admin) {
+      await reply(env, chatId, "Admin only.");
+      return;
+    }
+    const parsed = parseReplyArgs(stripCmd(text, "reply"));
+    if (!parsed) {
+      await reply(
+        env,
+        chatId,
+        "Usage:\n/reply last <text>\n/reply <userId> <text>\n/reply @username <text>\n\n(userId is shown on each /inbox line)",
+      );
+      return;
+    }
+    const target = resolveInboxTarget(await loadInbox(kv), parsed.target);
+    if (!target.ok) {
+      await reply(env, chatId, target.error);
+      return;
+    }
+    const outbound = `💬 ${parsed.body}`.slice(0, 4000);
+    const extra = {};
+    if (target.entry?.messageId != null) {
+      extra.reply_to_message_id = target.entry.messageId;
+      extra.allow_sending_without_reply = true;
+    }
+    const r = await reply(env, target.chatId, outbound, extra);
+    if (!r?.ok) {
+      await reply(
+        env,
+        chatId,
+        `Failed to DM ${target.label} (${target.chatId}). ` +
+          `They must have opened the bot at least once. ` +
+          `(${r?.description || "telegram error"})`,
+      );
+      return;
+    }
+    await reply(
+      env,
+      chatId,
+      `Replied to ${target.label} (chat ${target.chatId}).`,
     );
     return;
   }
