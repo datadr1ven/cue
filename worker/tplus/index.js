@@ -224,14 +224,20 @@ async function reply(env, chatId, text, extra = {}) {
 
 /**
  * Fan-out text (and optional photo via file_id) to all subscribers.
- * @param {{ photoFileId?: string|null }} [media]
+ * @param {{ photoFileId?: string|null, excludeChatIds?: Array<number|string|null|undefined> }} [media]
  */
 async function fanOut(env, kv, text, media = {}) {
   const ids = await subscriberIds(kv, env);
+  const exclude = new Set(
+    (media.excludeChatIds || [])
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n)),
+  );
   const photoFileId = media.photoFileId || null;
   const caption = String(text || "").slice(0, 1024);
   let n = 0;
   for (const id of ids) {
+    if (exclude.has(Number(id))) continue;
     let r;
     if (photoFileId) {
       r = await tg(env, "sendPhoto", {
@@ -667,11 +673,11 @@ async function handleCallback(env, kv, cq) {
 
   if (id === "__status") {
     const st = session.status();
+    // Toast only — a reply message would scroll the long /ops pad away
     await tg(env, "answerCallbackQuery", {
       callback_query_id: cq.id,
-      text: st.tPlusLabel,
+      text: `${st.tPlusLabel} · ${st.phase}`.slice(0, 200),
     });
-    await reply(env, chatId, `${st.tPlusLabel} · phase ${st.phase}`);
     return;
   }
 
@@ -680,28 +686,32 @@ async function handleCallback(env, kv, cq) {
   if (!result.ok) {
     await tg(env, "answerCallbackQuery", {
       callback_query_id: cq.id,
-      text: result.error || "error",
+      text: (result.error || "error").slice(0, 200),
+      show_alert: true,
     });
     return;
   }
 
   const alertText = result.alerts[0]?.text || `Marked ${id}`;
-  let extra = "";
+  let deltaBit = "";
   if (
     result.tPlusSec != null &&
     result.action?.scriptTPlusSec != null &&
     id !== "liftoff"
   ) {
     const delta = result.tPlusSec - result.action.scriptTPlusSec;
-    extra = `\n(script T+${formatTPlus(result.action.scriptTPlusSec)}, Δ ${delta >= 0 ? "+" : ""}${Math.round(delta)}s)`;
+    deltaBit = ` · Δ${delta >= 0 ? "+" : ""}${Math.round(delta)}s`;
   }
 
+  // Don't echo to the firing admin's chat (keeps /ops keyboard in view).
+  // Subscribers still get the alert; admin gets a toast ack.
+  const n = await fanOut(env, kv, alertText, {
+    excludeChatIds: [chatId, userId],
+  });
   await tg(env, "answerCallbackQuery", {
     callback_query_id: cq.id,
-    text: "ok",
+    text: `${alertText}${deltaBit} → ${n}`.slice(0, 200),
   });
-  const n = await fanOut(env, kv, alertText);
-  await reply(env, chatId, `${alertText}${extra}\n→ ${n} subscriber(s)`);
 }
 
 export default {

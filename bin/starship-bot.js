@@ -62,10 +62,15 @@ function requireAdmin(ctx) {
 
 /**
  * @param {string} text
- * @param {{ photoFileId?: string|null }} [media]
+ * @param {{ photoFileId?: string|null, excludeChatIds?: Array<number|string|null|undefined> }} [media]
  */
 async function fanOut(text, media = {}) {
   reloadSubscribers();
+  const exclude = new Set(
+    (media.excludeChatIds || [])
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n)),
+  );
   const users = [...subscribers.values()];
   if (users.length === 0) {
     console.log(`[no-subscribers] ${text.replace(/\n/g, " | ")}`);
@@ -73,6 +78,7 @@ async function fanOut(text, media = {}) {
   }
   let n = 0;
   for (const user of users) {
+    if (exclude.has(Number(user.user_id))) continue;
     const r = await deliver(bot, runtime, user.user_id, text, {
       photoFileId: media.photoFileId,
     });
@@ -325,31 +331,31 @@ bot.on("callback_query", async (ctx) => {
 
   if (id === "__status") {
     const st = session.status();
-    await ctx.answerCbQuery(st.tPlusLabel);
-    await ctx.reply(`${st.tPlusLabel} · phase ${st.phase}`);
+    await ctx.answerCbQuery(`${st.tPlusLabel} · ${st.phase}`.slice(0, 200));
     return;
   }
 
   const result = await session.fire(id);
   if (!result.ok) {
-    await ctx.answerCbQuery(result.error || "error");
+    await ctx.answerCbQuery(result.error || "error", { show_alert: true });
     return;
   }
 
   const alertText = result.alerts[0]?.text || `Marked ${id}`;
-  let extra = "";
+  let deltaBit = "";
   if (
     result.tPlusSec != null &&
     result.action?.scriptTPlusSec != null &&
     id !== "liftoff"
   ) {
     const delta = result.tPlusSec - result.action.scriptTPlusSec;
-    extra = `\n(script T+${formatTPlus(result.action.scriptTPlusSec)}, Δ ${delta >= 0 ? "+" : ""}${Math.round(delta)}s)`;
+    deltaBit = ` · Δ${delta >= 0 ? "+" : ""}${Math.round(delta)}s`;
   }
 
-  await ctx.answerCbQuery("ok");
-  const { n } = await fanOut(alertText);
-  await ctx.reply(`${alertText}${extra}\n→ ${n} subscriber(s)`);
+  const { n } = await fanOut(alertText, {
+    excludeChatIds: [ctx.from?.id, ctx.chat?.id],
+  });
+  await ctx.answerCbQuery(`${alertText}${deltaBit} → ${n}`.slice(0, 200));
 });
 
 bot.launch().then(async () => {
