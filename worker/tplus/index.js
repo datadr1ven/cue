@@ -222,6 +222,203 @@ async function reply(env, chatId, text, extra = {}) {
   });
 }
 
+const KV_SUGGESTS = "suggest:v1";
+
+function suggestSecretOk(env, request) {
+  const want = env.TPLUS_SUGGEST_SECRET || env.SUGGEST_SECRET || "";
+  if (!want) return false;
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const header = request.headers.get("X-Suggest-Secret") || "";
+  return bearer === want || header === want;
+}
+
+function shortSuggestId() {
+  return `${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 5)}`;
+}
+
+async function loadSuggests(kv) {
+  return kvGetJson(kv, KV_SUGGESTS, { pending: {} });
+}
+
+async function saveSuggests(kv, data) {
+  await kvPutJson(kv, KV_SUGGESTS, data);
+}
+
+function formatSuggestMessage(s) {
+  const t =
+    s.scriptTPlusSec != null && Number.isFinite(Number(s.scriptTPlusSec))
+      ? `T+${formatTPlus(Number(s.scriptTPlusSec))}`
+      : "T+?—";
+  const sources = (s.evidence?.sources || []).join(", ") || "schedule";
+  const lock = s.evidence?.clockLock;
+  const lockLine = lock
+    ? `clock: ${lock.method || "?"} · liftoff@file ${Number(lock.liftoffFileSec).toFixed(0)}s` +
+      (lock.spreadSec != null ? ` · spread ${Number(lock.spreadSec).toFixed(0)}s` : "")
+    : null;
+  const lines = [
+    `❔ Suggest · ${t} · ${s.label || s.actionId}`,
+    `action: ${s.actionId}`,
+    s.missionId ? `mission: ${s.missionId}` : null,
+    `sources: ${sources}`,
+    lockLine,
+    "",
+    "Approve → fan-out to subscribers · Dismiss → drop",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+function suggestKeyboard(id) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Approve", callback_data: `sg:a:${id}` },
+        { text: "✖️ Dismiss", callback_data: `sg:d:${id}` },
+      ],
+    ],
+  };
+}
+
+/**
+ * Laptop/OCR scheduler → admin Approve/Dismiss.
+ * Auth: Bearer TPLUS_SUGGEST_SECRET
+ */
+async function handleSuggestPost(request, env, kv) {
+  if (!suggestSecretOk(env, request)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response("bad json", { status: 400 });
+  }
+  const actionId = body?.actionId != null ? String(body.actionId).trim() : "";
+  if (!actionId) {
+    return new Response('need { "actionId": "…" }', { status: 400 });
+  }
+  const admins = parseAdminIds(env);
+  if (!admins.length) {
+    return new Response("TELEGRAM_ADMIN_IDS not configured", { status: 500 });
+  }
+
+  const id = shortSuggestId();
+  const suggest = {
+    id,
+    actionId,
+    label: body.label != null ? String(body.label) : actionId,
+    scriptTPlusSec:
+      body.scriptTPlusSec != null && Number.isFinite(Number(body.scriptTPlusSec))
+        ? Number(body.scriptTPlusSec)
+        : null,
+    missionId: body.missionId != null ? String(body.missionId) : null,
+    evidence: body.evidence && typeof body.evidence === "object" ? body.evidence : {},
+    createdAt: new Date().toISOString(),
+  };
+
+  // Optionally switch active mission if scheduler names one we know
+  if (suggest.missionId) {
+    const session = await getSession(env, kv);
+    if (session.scriptDoc?.missionId !== suggest.missionId) {
+      const r = session.loadMission(suggest.missionId);
+      if (r.ok) await persistSession(kv, session);
+    }
+  }
+
+  const store = await loadSuggests(kv);
+  store.pending = store.pending || {};
+  store.pending[id] = suggest;
+  // Cap pending map
+  const ids = Object.keys(store.pending);
+  if (ids.length > 40) {
+    for (const old of ids.slice(0, ids.length - 40)) delete store.pending[old];
+  }
+  await saveSuggests(kv, store);
+
+  const text = formatSuggestMessage(suggest);
+  const markup = suggestKeyboard(id);
+  let n = 0;
+  for (const adminId of admins) {
+    const r = await reply(env, adminId, text, { reply_markup: markup });
+    if (r.ok) n += 1;
+  }
+  return Response.json({ ok: true, id, adminsNotified: n });
+}
+
+async function handleSuggestCallback(env, kv, cq, kind, id) {
+  const userId = cq.from?.id;
+  const chatId = cq.message?.chat?.id;
+  const store = await loadSuggests(kv);
+  const suggest = store.pending?.[id];
+  if (!suggest) {
+    await tg(env, "answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "Already handled or expired",
+      show_alert: true,
+    });
+    if (cq.message?.message_id != null && chatId != null) {
+      await tg(env, "editMessageReplyMarkup", {
+        chat_id: chatId,
+        message_id: cq.message.message_id,
+        reply_markup: { inline_keyboard: [] },
+      });
+    }
+    return;
+  }
+
+  delete store.pending[id];
+  await saveSuggests(kv, store);
+
+  if (kind === "d") {
+    await tg(env, "answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "Dismissed",
+    });
+    if (cq.message?.message_id != null && chatId != null) {
+      await tg(env, "editMessageText", {
+        chat_id: chatId,
+        message_id: cq.message.message_id,
+        text: `✖️ Dismissed · ${suggest.label || suggest.actionId}`,
+      });
+    }
+    return;
+  }
+
+  // Approve → fire + fan-out (no admin echo)
+  const session = await getSession(env, kv);
+  if (
+    suggest.missionId &&
+    session.scriptDoc?.missionId !== suggest.missionId
+  ) {
+    session.loadMission(suggest.missionId);
+  }
+  const result = await session.fire(suggest.actionId);
+  await persistSession(kv, session);
+  if (!result.ok) {
+    await tg(env, "answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: (result.error || "fire failed").slice(0, 200),
+      show_alert: true,
+    });
+    return;
+  }
+  const alertText = result.alerts[0]?.text || suggest.label || suggest.actionId;
+  const n = await fanOut(env, kv, alertText, {
+    excludeChatIds: [chatId, userId],
+  });
+  await tg(env, "answerCallbackQuery", {
+    callback_query_id: cq.id,
+    text: `Approved → ${n}`.slice(0, 200),
+  });
+  if (cq.message?.message_id != null && chatId != null) {
+    await tg(env, "editMessageText", {
+      chat_id: chatId,
+      message_id: cq.message.message_id,
+      text: `✅ Approved · ${alertText}\n→ ${n} subscriber(s)`,
+    });
+  }
+}
+
 /**
  * Fan-out text (and optional photo via file_id) to all subscribers.
  * @param {{ photoFileId?: string|null, excludeChatIds?: Array<number|string|null|undefined> }} [media]
@@ -664,6 +861,20 @@ async function handleCallback(env, kv, cq) {
   }
 
   const data = cq.data || "";
+
+  // Schedule / OCR suggestions: sg:a:<id> | sg:d:<id>
+  if (data.startsWith("sg:")) {
+    const parts = data.split(":");
+    const kind = parts[1];
+    const sid = parts.slice(2).join(":");
+    if ((kind === "a" || kind === "d") && sid) {
+      await handleSuggestCallback(env, kv, cq, kind, sid);
+    } else {
+      await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
+    }
+    return;
+  }
+
   if (!data.startsWith("ss:")) {
     await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
     return;
@@ -727,6 +938,16 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/") {
       return new Response("TPlus worker ok", { status: 200 });
+    }
+
+    // Laptop schedule/OCR → admin Approve/Dismiss
+    if (request.method === "POST" && url.pathname === "/suggest") {
+      try {
+        return await handleSuggestPost(request, env, env.TPLUS_KV);
+      } catch (e) {
+        console.error("suggest error", e);
+        return new Response("error", { status: 500 });
+      }
     }
 
     // Webhook: /telegram or /telegram/<WEBHOOK_SECRET>

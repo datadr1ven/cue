@@ -43,6 +43,8 @@
     "publish": "node bin/publish-ndjson.js",
     "starship:ops": "node bin/starship-ops.js",
     "starship:bot": "node bin/starship-bot.js",
+    "webcast:ocr-clock": ".venv-webcast/bin/python src/webcast/ocr_clock.py",
+    "webcast:schedule": "node bin/webcast-schedule.js",
     "validate:missions": "node bin/validate-mission.js",
     "smoke:tplus": "node bin/smoke-tplus.js",
     "smoke:gridwhisper": "node bin/smoke-gridwhisper.js",
