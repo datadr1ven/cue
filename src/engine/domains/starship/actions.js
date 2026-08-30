@@ -186,3 +186,45 @@ export function formatTPlus(sec) {
   }
   return `${m}:${String(r).padStart(2, "0")}`;
 }
+
+/**
+ * Telegram /ops button text (max 64 chars).
+ * Script milestones: "T+1:08 Max Q". Always-on (hold/go/…): label only.
+ * @param {{ label?: string, id?: string, scriptTPlusSec?: number|null }} action
+ */
+export function formatOpsButtonLabel(action) {
+  const label = String(action?.label || action?.id || "action").trim();
+  const t = action?.scriptTPlusSec;
+  if (t != null && Number.isFinite(Number(t))) {
+    return `T+${formatTPlus(Number(t))} ${label}`.slice(0, 64);
+  }
+  return label.slice(0, 64);
+}
+
+/**
+ * Inline keyboard rows for /ops: one button per row by default + status.
+ * @param {Array<{ id: string, label?: string, scriptTPlusSec?: number|null }>} actions
+ * @param {{ columns?: number }} [opts]
+ * @returns {{ text: string, callback_data: string }[][]}
+ */
+export function opsInlineKeyboardRows(actions, opts = {}) {
+  const columns = Math.max(1, Number(opts.columns) || 1);
+  /** @type {{ text: string, callback_data: string }[][]} */
+  const rows = [];
+  /** @type {{ text: string, callback_data: string }[]} */
+  let row = [];
+  for (const a of actions || []) {
+    if (!a?.id) continue;
+    row.push({
+      text: formatOpsButtonLabel(a),
+      callback_data: `ss:${a.id}`,
+    });
+    if (row.length >= columns) {
+      rows.push(row);
+      row = [];
+    }
+  }
+  if (row.length) rows.push(row);
+  rows.push([{ text: "T+ / status", callback_data: "ss:__status" }]);
+  return rows;
+}

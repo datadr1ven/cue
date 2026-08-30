@@ -115,5 +115,27 @@ const browse = s2.formatTimeline(12);
 assert(browse.includes("Liftoff") || browse.includes("liftoff") || browse.length > 20, "timeline");
 console.log("✓ format timeline");
 
+{
+  const {
+    opsActionsForScript,
+    formatOpsButtonLabel,
+    opsInlineKeyboardRows,
+  } = await import("../src/engine/domains/starship/index.js");
+  const roman = bundledLoadMission("roman-fh");
+  const actions = opsActionsForScript(roman.doc.script);
+  const maxQ = actions.find((a) => a.id === "max_q");
+  assert(maxQ?.scriptTPlusSec === 68, "roman max_q T+");
+  assert(
+    formatOpsButtonLabel(maxQ) === "T+1:08 Max Q",
+    `ops label got ${formatOpsButtonLabel(maxQ)}`,
+  );
+  const hold = actions.find((a) => a.id === "hold");
+  assert(formatOpsButtonLabel(hold) === "Hold / scrub", "hold has no T+");
+  const rows = opsInlineKeyboardRows(actions, { columns: 1 });
+  assert(rows.every((r) => r.length === 1), "single-column ops pad");
+  assert(rows.at(-1)?.[0]?.callback_data === "ss:__status", "status row last");
+  console.log("✓ /ops button labels include script T+ (1 column)");
+}
+
 console.log(`✓ alerts fired: ${alerts.length}`);
 console.log("OK smoke:tplus");

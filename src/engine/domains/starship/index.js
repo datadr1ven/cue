@@ -19,6 +19,8 @@ export {
   actionById,
   formatHelp,
   formatTPlus,
+  formatOpsButtonLabel,
   opsActionsForScript,
+  opsInlineKeyboardRows,
 } from "./actions.js";
 export { tPlusSec } from "./snapshot.js";

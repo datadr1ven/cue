@@ -15,6 +15,7 @@ import { createStarshipSession } from "../../src/starship-session.js";
 import {
   formatTPlus,
   opsActionsForScript,
+  opsInlineKeyboardRows,
 } from "../../src/engine/domains/starship/index.js";
 import {
   bundledLoadMission,
@@ -319,22 +320,7 @@ async function persistSession(kv, session) {
 function opsKeyboard(session) {
   const script = session?.scriptDoc?.script || [];
   const actions = opsActionsForScript(script);
-  const inline_keyboard = [];
-  let row = [];
-  for (const a of actions) {
-    // Prefer readable script label; keep key prefix for muscle memory
-    row.push({
-      text: `${a.key}:${a.label}`.slice(0, 64),
-      callback_data: `ss:${a.id}`,
-    });
-    if (row.length === 2) {
-      inline_keyboard.push(row);
-      row = [];
-    }
-  }
-  if (row.length) inline_keyboard.push(row);
-  inline_keyboard.push([{ text: "T+ / status", callback_data: "ss:__status" }]);
-  return { inline_keyboard };
+  return { inline_keyboard: opsInlineKeyboardRows(actions, { columns: 1 }) };
 }
 
 function userHelp() {

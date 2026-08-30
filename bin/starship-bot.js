@@ -21,6 +21,7 @@ import { deliver } from "../src/delivery.js";
 import {
   formatTPlus,
   opsActionsForScript,
+  opsInlineKeyboardRows,
 } from "../src/engine/domains/starship/index.js";
 import { createStarshipSession } from "../src/starship-session-node.js";
 import {
@@ -87,19 +88,9 @@ async function fanOut(text, media = {}) {
 
 function opsKeyboard() {
   const actions = opsActionsForScript(session.scriptDoc?.script || []);
-  const rows = [];
-  let row = [];
-  for (const a of actions) {
-    row.push(
-      Markup.button.callback(`${a.key}:${a.label}`.slice(0, 64), `ss:${a.id}`),
-    );
-    if (row.length === 2) {
-      rows.push(row);
-      row = [];
-    }
-  }
-  if (row.length) rows.push(row);
-  rows.push([Markup.button.callback("T+ / status", "ss:__status")]);
+  const rows = opsInlineKeyboardRows(actions, { columns: 1 }).map((row) =>
+    row.map((b) => Markup.button.callback(b.text, b.callback_data)),
+  );
   return Markup.inlineKeyboard(rows);
 }
 
