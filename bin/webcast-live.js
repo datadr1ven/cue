@@ -468,13 +468,13 @@ async function main() {
                 args.telegramToken,
                 args.adminId,
                 still,
-                { kind: "photo", label: `${row.label || key} frame` },
+                { kind: "photo", label: `[artifact] ${row.label || key}` },
               );
               if (fileId) {
                 artifacts.push({
                   id: "f0",
                   kind: "photo",
-                  label: "event frame",
+                  label: row.label || key,
                   fileId,
                   defaultOn: true,
                 });
