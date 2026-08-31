@@ -245,38 +245,85 @@ async function saveSuggests(kv, data) {
   await kvPutJson(kv, KV_SUGGESTS, data);
 }
 
+function normalizeArtifacts(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .slice(0, 8)
+    .map((a, i) => ({
+      id: String(a.id || `a${i}`).slice(0, 12),
+      kind: a.kind === "voice" || a.kind === "audio" ? "voice" : "photo",
+      label: String(a.label || a.id || `artifact ${i}`).slice(0, 40),
+      fileId: a.fileId != null ? String(a.fileId) : null,
+      selected: a.defaultOn !== false && a.selected !== false,
+    }))
+    .filter((a) => a.fileId);
+}
+
 function formatSuggestMessage(s) {
   const t =
     s.scriptTPlusSec != null && Number.isFinite(Number(s.scriptTPlusSec))
       ? `T+${formatTPlus(Number(s.scriptTPlusSec))}`
       : "T+?—";
   const sources = (s.evidence?.sources || []).join(", ") || "schedule";
-  const lock = s.evidence?.clockLock;
-  const lockLine = lock
-    ? `clock: ${lock.method || "?"} · liftoff@file ${Number(lock.liftoffFileSec).toFixed(0)}s` +
-      (lock.spreadSec != null ? ` · spread ${Number(lock.spreadSec).toFixed(0)}s` : "")
+  const clock = s.evidence?.clock || s.evidence?.clockLock;
+  const clockLine = clock
+    ? clock.tPlusSec != null
+      ? `clock belief: T+${formatTPlus(Number(clock.tPlusSec))} (${clock.source || "ocr"})`
+      : `clock: ${clock.method || "?"} · liftoff@file ${Number(clock.liftoffFileSec).toFixed(0)}s`
     : null;
+  const asrHits = Array.isArray(s.evidence?.asrHits) ? s.evidence.asrHits : [];
+  const asrLines = asrHits.slice(0, 4).map((h) => {
+    const raw = String(h.raw || h.pattern || "").slice(0, 80);
+    return `asr: ${raw}`;
+  });
+  const scroller = Array.isArray(s.evidence?.scroller) ? s.evidence.scroller : [];
+  const scrollLines = scroller
+    .filter((x) => x.atPresent)
+    .slice(0, 3)
+    .map((x) => `hud: ${String(x.label || "").slice(0, 40)} (at present)`);
+  const arts = normalizeArtifacts(s.artifacts);
+  const artLines =
+    arts.length > 0
+      ? ["artifacts (tap to toggle):", ...arts.map((a) => `${a.selected ? "✅" : "⬜"} ${a.label}`)]
+      : ["artifacts: (none)"];
   const lines = [
     `❔ Suggest · ${t} · ${s.label || s.actionId}`,
     `action: ${s.actionId}`,
     s.missionId ? `mission: ${s.missionId}` : null,
     `sources: ${sources}`,
-    lockLine,
+    clockLine,
+    ...asrLines,
+    ...scrollLines,
     "",
-    "Approve → fan-out to subscribers · Dismiss → drop",
-  ].filter(Boolean);
+    ...artLines,
+    "",
+    "Approve selected → subscribers · Dismiss → drop",
+  ].filter((x) => x != null);
   return lines.join("\n");
 }
 
-function suggestKeyboard(id) {
-  return {
-    inline_keyboard: [
-      [
-        { text: "✅ Approve", callback_data: `sg:a:${id}` },
-        { text: "✖️ Dismiss", callback_data: `sg:d:${id}` },
-      ],
-    ],
-  };
+function suggestKeyboard(s) {
+  const id = s.id;
+  const arts = normalizeArtifacts(s.artifacts);
+  const rows = [];
+  let row = [];
+  for (let i = 0; i < arts.length; i++) {
+    const a = arts[i];
+    row.push({
+      text: `${a.selected ? "✅" : "⬜"} ${a.label}`.slice(0, 64),
+      callback_data: `sg:t:${id}:${i}`,
+    });
+    if (row.length === 2) {
+      rows.push(row);
+      row = [];
+    }
+  }
+  if (row.length) rows.push(row);
+  rows.push([
+    { text: "✅ Approve selected", callback_data: `sg:a:${id}` },
+    { text: "✖️ Dismiss", callback_data: `sg:d:${id}` },
+  ]);
+  return { inline_keyboard: rows };
 }
 
 /**
@@ -303,6 +350,7 @@ async function handleSuggestPost(request, env, kv) {
   }
 
   const id = shortSuggestId();
+  const artifacts = normalizeArtifacts(body.artifacts);
   const suggest = {
     id,
     actionId,
@@ -313,6 +361,7 @@ async function handleSuggestPost(request, env, kv) {
         : null,
     missionId: body.missionId != null ? String(body.missionId) : null,
     evidence: body.evidence && typeof body.evidence === "object" ? body.evidence : {},
+    artifacts,
     createdAt: new Date().toISOString(),
   };
 
@@ -336,16 +385,34 @@ async function handleSuggestPost(request, env, kv) {
   await saveSuggests(kv, store);
 
   const text = formatSuggestMessage(suggest);
-  const markup = suggestKeyboard(id);
+  const markup = suggestKeyboard(suggest);
   let n = 0;
   for (const adminId of admins) {
     const r = await reply(env, adminId, text, { reply_markup: markup });
     if (r.ok) n += 1;
+    // Preview media quietly so op can see artifacts before approve
+    for (const art of artifacts) {
+      if (art.kind === "voice") {
+        await tg(env, "sendVoice", {
+          chat_id: adminId,
+          voice: art.fileId,
+          caption: art.label,
+          disable_notification: true,
+        });
+      } else {
+        await tg(env, "sendPhoto", {
+          chat_id: adminId,
+          photo: art.fileId,
+          caption: art.label,
+          disable_notification: true,
+        });
+      }
+    }
   }
-  return Response.json({ ok: true, id, adminsNotified: n });
+  return Response.json({ ok: true, id, adminsNotified: n, artifacts: artifacts.length });
 }
 
-async function handleSuggestCallback(env, kv, cq, kind, id) {
+async function handleSuggestCallback(env, kv, cq, kind, id, artIndex) {
   const userId = cq.from?.id;
   const chatId = cq.message?.chat?.id;
   const store = await loadSuggests(kv);
@@ -362,6 +429,33 @@ async function handleSuggestCallback(env, kv, cq, kind, id) {
         message_id: cq.message.message_id,
         reply_markup: { inline_keyboard: [] },
       });
+    }
+    return;
+  }
+
+  // Toggle artifact selection
+  if (kind === "t") {
+    const arts = normalizeArtifacts(suggest.artifacts);
+    const i = Number(artIndex);
+    if (Number.isFinite(i) && arts[i]) {
+      arts[i].selected = !arts[i].selected;
+      suggest.artifacts = arts;
+      store.pending[id] = suggest;
+      await saveSuggests(kv, store);
+      await tg(env, "answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `${arts[i].selected ? "include" : "skip"} ${arts[i].label}`.slice(0, 200),
+      });
+      if (cq.message?.message_id != null && chatId != null) {
+        await tg(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: cq.message.message_id,
+          text: formatSuggestMessage(suggest),
+          reply_markup: suggestKeyboard(suggest),
+        });
+      }
+    } else {
+      await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
     }
     return;
   }
@@ -384,7 +478,7 @@ async function handleSuggestCallback(env, kv, cq, kind, id) {
     return;
   }
 
-  // Approve → fire + fan-out (no admin echo)
+  // Approve → fire + fan-out text + selected artifacts (no admin echo)
   const session = await getSession(env, kv);
   if (
     suggest.missionId &&
@@ -403,25 +497,30 @@ async function handleSuggestCallback(env, kv, cq, kind, id) {
     return;
   }
   const alertText = result.alerts[0]?.text || suggest.label || suggest.actionId;
+  const selected = normalizeArtifacts(suggest.artifacts).filter((a) => a.selected);
   const n = await fanOut(env, kv, alertText, {
     excludeChatIds: [chatId, userId],
+    artifacts: selected,
   });
   await tg(env, "answerCallbackQuery", {
     callback_query_id: cq.id,
-    text: `Approved → ${n}`.slice(0, 200),
+    text: `Approved → ${n} (+${selected.length} media)`.slice(0, 200),
   });
   if (cq.message?.message_id != null && chatId != null) {
     await tg(env, "editMessageText", {
       chat_id: chatId,
       message_id: cq.message.message_id,
-      text: `✅ Approved · ${alertText}\n→ ${n} subscriber(s)`,
+      text:
+        `✅ Approved · ${alertText}\n` +
+        `media: ${selected.map((a) => a.label).join(", ") || "(none)"}\n` +
+        `→ ${n} subscriber(s)`,
     });
   }
 }
 
 /**
- * Fan-out text (and optional photo via file_id) to all subscribers.
- * @param {{ photoFileId?: string|null, excludeChatIds?: Array<number|string|null|undefined> }} [media]
+ * Fan-out text (and optional photo / artifact file_ids) to all subscribers.
+ * @param {{ photoFileId?: string|null, excludeChatIds?: Array<number|string|null|undefined>, artifacts?: Array<{kind:string,fileId:string,label?:string}> }} [media]
  */
 async function fanOut(env, kv, text, media = {}) {
   const ids = await subscriberIds(kv, env);
@@ -431,12 +530,13 @@ async function fanOut(env, kv, text, media = {}) {
       .filter((n) => Number.isFinite(n)),
   );
   const photoFileId = media.photoFileId || null;
+  const artifacts = Array.isArray(media.artifacts) ? media.artifacts : [];
   const caption = String(text || "").slice(0, 1024);
   let n = 0;
   for (const id of ids) {
     if (exclude.has(Number(id))) continue;
     let r;
-    if (photoFileId) {
+    if (photoFileId && artifacts.length === 0) {
       r = await tg(env, "sendPhoto", {
         chat_id: id,
         photo: photoFileId,
@@ -446,6 +546,23 @@ async function fanOut(env, kv, text, media = {}) {
       r = await reply(env, id, text);
     }
     if (r.ok) n += 1;
+    for (let i = 0; i < artifacts.length; i++) {
+      const art = artifacts[i];
+      if (!art?.fileId) continue;
+      if (art.kind === "voice" || art.kind === "audio") {
+        await tg(env, "sendVoice", {
+          chat_id: id,
+          voice: art.fileId,
+          caption: art.label || undefined,
+        });
+      } else {
+        await tg(env, "sendPhoto", {
+          chat_id: id,
+          photo: art.fileId,
+          caption: art.label || (i === 0 ? caption : undefined),
+        });
+      }
+    }
   }
   return n;
 }
@@ -862,13 +979,20 @@ async function handleCallback(env, kv, cq) {
 
   const data = cq.data || "";
 
-  // Schedule / OCR suggestions: sg:a:<id> | sg:d:<id>
+  // Schedule / OCR suggestions: sg:a:<id> | sg:d:<id> | sg:t:<id>:<i>
   if (data.startsWith("sg:")) {
     const parts = data.split(":");
     const kind = parts[1];
-    const sid = parts.slice(2).join(":");
-    if ((kind === "a" || kind === "d") && sid) {
-      await handleSuggestCallback(env, kv, cq, kind, sid);
+    if (kind === "t" && parts[2] != null && parts[3] != null) {
+      await handleSuggestCallback(env, kv, cq, kind, parts[2], parts[3]);
+    } else if ((kind === "a" || kind === "d") && parts[2]) {
+      await handleSuggestCallback(
+        env,
+        kv,
+        cq,
+        kind,
+        parts.slice(2).join(":"),
+      );
     } else {
       await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
     }

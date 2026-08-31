@@ -193,7 +193,7 @@ def write_html_report(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Webcast mission-clock OCR prototype")
-    ap.add_argument("--video", required=True, help="Path to mp4/mkv")
+    ap.add_argument("--video", default=None, help="Path to mp4/mkv")
     ap.add_argument("--every", type=float, default=30.0, help="Sample period (sec)")
     ap.add_argument("--from", dest="from_sec", type=float, default=0.0)
     ap.add_argument("--to", dest="to_sec", type=float, default=None)
@@ -226,7 +226,77 @@ def main() -> int:
         help="Emit JSON clock lock to stdout (liftoff file offset from OCR samples). "
         "Human table goes to stderr.",
     )
+    ap.add_argument(
+        "--image",
+        default=None,
+        help="OCR a single JPEG/PNG; print JSON {clockSec,texts,boxes} to stdout",
+    )
     args = ap.parse_args()
+
+    if args.image:
+        from rapidocr_onnxruntime import RapidOCR
+        import cv2
+        import json as json_mod
+
+        img_path = Path(args.image).expanduser().resolve()
+        if not img_path.exists():
+            print(json_mod.dumps({"ok": False, "error": f"missing {img_path}"}))
+            return 1
+        ocr = RapidOCR()
+        img = cv2.imread(str(img_path))
+        if img is None:
+            print(json_mod.dumps({"ok": False, "error": "unreadable image"}))
+            return 1
+        h, w = img.shape[:2]
+        scale = args.scale or 1.5
+        if scale != 1.0:
+            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        result, _elapse = ocr(img)
+        texts = []
+        boxes = []
+        if result:
+            for row in result:
+                texts.append(row[1])
+                box = row[0]
+                # box: 4 points; normalize to 0–1 of scaled image then original
+                xs = [p[0] / (w * scale) for p in box]
+                ys = [p[1] / (h * scale) for p in box]
+                boxes.append(
+                    {
+                        "text": row[1],
+                        "cx": float(sum(xs) / 4),
+                        "cy": float(sum(ys) / 4),
+                        "conf": float(row[2]) if row[2] is not None else None,
+                    }
+                )
+        clock_sec, raw = parse_clock_texts(texts)
+        # Falcon arc "at present": labels near bottom-center horizontal mid
+        present = [
+            b
+            for b in boxes
+            if 0.35 <= b["cx"] <= 0.65 and 0.72 <= b["cy"] <= 0.92
+            and not CLOCK_RE.search(b["text"] or "")
+        ]
+        print(
+            json_mod.dumps(
+                {
+                    "ok": True,
+                    "clockSec": clock_sec,
+                    "raw": raw,
+                    "texts": texts,
+                    "boxes": boxes,
+                    "scrollerPresent": present[:8],
+                    "width": w,
+                    "height": h,
+                }
+            ),
+            flush=True,
+        )
+        return 0
+
+    if not args.video:
+        print("need --video or --image", file=sys.stderr)
+        return 1
 
     video = Path(args.video).expanduser().resolve()
     if not video.exists():

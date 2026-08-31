@@ -1,0 +1,190 @@
+{
+  "id": "falcon-default",
+  "description": "SpaceX Falcon 9 / Falcon Heavy webcast phrase → TPlus action suggestions",
+  "cooldownSec": 45,
+  "phrases": [
+    {
+      "id": "liftoff",
+      "actionId": "liftoff",
+      "severity": 9,
+      "patterns": ["liftoff", "lift off", "we have liftoff", "and liftoff"]
+    },
+    {
+      "id": "max_q",
+      "actionId": "max_q",
+      "severity": 6,
+      "patterns": ["max q", "maxq", "maximum dynamic pressure"]
+    },
+    {
+      "id": "side_beco",
+      "actionId": "side_beco",
+      "severity": 7,
+      "patterns": [
+        "beco",
+        "side booster engine cutoff",
+        "booster engine cutoff",
+        "side boosters engine cutoff"
+      ]
+    },
+    {
+      "id": "side_sep",
+      "actionId": "side_sep",
+      "severity": 8,
+      "patterns": [
+        "side boosters separate",
+        "side booster separation",
+        "boosters have separated",
+        "side boosters have separated"
+      ]
+    },
+    {
+      "id": "side_flip",
+      "actionId": "side_flip",
+      "severity": 6,
+      "patterns": ["side boosters flip", "boosters flip", "flip maneuver"]
+    },
+    {
+      "id": "boostback_start",
+      "actionId": "boostback_start",
+      "severity": 7,
+      "patterns": [
+        "boostback",
+        "boost back",
+        "boostback burn",
+        "start of boostback"
+      ]
+    },
+    {
+      "id": "meco",
+      "actionId": "meco",
+      "severity": 7,
+      "patterns": [
+        "meco",
+        "main engine cutoff",
+        "center core engine cutoff",
+        "first stage engine cutoff"
+      ]
+    },
+    {
+      "id": "stage_sep",
+      "actionId": "stage_sep",
+      "severity": 8,
+      "patterns": [
+        "stage separation",
+        "stages separate",
+        "first and second stage",
+        "separation confirmed"
+      ]
+    },
+    {
+      "id": "ses1",
+      "actionId": "ses1",
+      "severity": 7,
+      "patterns": [
+        "ses 1",
+        "ses-1",
+        "ses one",
+        "second stage ignition",
+        "second stage engine start",
+        "second stage startup"
+      ]
+    },
+    {
+      "id": "fairing",
+      "actionId": "fairing",
+      "severity": 6,
+      "patterns": ["fairing", "fairing separation", "payload fairing"]
+    },
+    {
+      "id": "entry_burn",
+      "actionId": "entry_burn",
+      "severity": 7,
+      "patterns": ["entry burn", "entryburn"]
+    },
+    {
+      "id": "landing_burn",
+      "actionId": "landing_burn_booster",
+      "severity": 8,
+      "patterns": ["landing burn", "landingburn", "landing burn startup"]
+    },
+    {
+      "id": "booster_landing",
+      "actionId": "booster_landing",
+      "severity": 9,
+      "patterns": [
+        "landing confirmed",
+        "landing successful",
+        "successful landing",
+        "touchdown",
+        "has landed",
+        "have landed",
+        "boosters have landed",
+        "side boosters have landed",
+        "booster has landed"
+      ]
+    },
+    {
+      "id": "seco",
+      "actionId": "seco",
+      "severity": 7,
+      "patterns": ["seco", "seco 1", "seco-1", "second stage engine cutoff"]
+    },
+    {
+      "id": "ses2",
+      "actionId": "ses2",
+      "severity": 7,
+      "patterns": [
+        "ses 2",
+        "ses-2",
+        "ses two",
+        "second engine start two",
+        "second stage restart"
+      ]
+    },
+    {
+      "id": "seco2",
+      "actionId": "seco2",
+      "severity": 6,
+      "patterns": ["seco 2", "seco-2", "seco two"]
+    },
+    {
+      "id": "deploy",
+      "actionId": "deploy_start",
+      "severity": 8,
+      "patterns": [
+        "spacecraft separation",
+        "payload deploy",
+        "payload deployment",
+        "satellites deploy",
+        "satellite deploy",
+        "starlink deploy",
+        "roman deploy",
+        "telescope deploy",
+        "deployment confirmed"
+      ]
+    },
+    {
+      "id": "nominal",
+      "actionId": "success",
+      "severity": 6,
+      "cooldownSec": 120,
+      "patterns": [
+        "all systems nominal",
+        "mission success",
+        "successful mission"
+      ]
+    },
+    {
+      "id": "hold",
+      "actionId": "hold",
+      "severity": 8,
+      "patterns": ["hold", "hold hold", "scrub", "recycle", "abort"]
+    },
+    {
+      "id": "go_launch",
+      "actionId": "go",
+      "severity": 7,
+      "patterns": ["go for launch", "verified go for launch", "ld go for launch"]
+    }
+  ]
+}

@@ -1,0 +1,227 @@
+{
+  "id": "starship-default",
+  "description": "SpaceX Starship / Super Heavy webcast phrase → TPlus action suggestions",
+  "cooldownSec": 45,
+  "phrases": [
+    {
+      "id": "liftoff",
+      "actionId": "liftoff",
+      "severity": 9,
+      "patterns": [
+        "liftoff",
+        "lift off",
+        "we have liftoff",
+        "and liftoff",
+        "starship liftoff"
+      ]
+    },
+    {
+      "id": "max_q",
+      "actionId": "max_q",
+      "severity": 6,
+      "patterns": ["max q", "maxq", "maximum dynamic pressure", "maximum aerodynamic pressure"]
+    },
+    {
+      "id": "meco",
+      "actionId": "meco",
+      "severity": 7,
+      "patterns": [
+        "meco",
+        "super heavy meco",
+        "booster meco",
+        "main engine cutoff",
+        "raptor engine cutoff"
+      ]
+    },
+    {
+      "id": "hot_stage",
+      "actionId": "hot_stage",
+      "severity": 9,
+      "patterns": [
+        "hot staging",
+        "hot-staging",
+        "hot stage",
+        "hot stage separation",
+        "hot staging separation"
+      ]
+    },
+    {
+      "id": "boostback_start",
+      "actionId": "boostback_start",
+      "severity": 7,
+      "patterns": [
+        "boostback",
+        "boost back",
+        "boostback burn",
+        "start of boostback",
+        "booster boostback"
+      ]
+    },
+    {
+      "id": "boostback_end",
+      "actionId": "boostback_end",
+      "severity": 6,
+      "patterns": ["boostback complete", "boost back complete", "end of boostback"]
+    },
+    {
+      "id": "landing_burn_booster",
+      "actionId": "landing_burn_booster",
+      "severity": 8,
+      "patterns": [
+        "booster landing burn",
+        "super heavy landing burn",
+        "13 engine landing burn",
+        "landing burn to slow the booster"
+      ]
+    },
+    {
+      "id": "booster_splash",
+      "actionId": "booster_splash",
+      "severity": 8,
+      "patterns": [
+        "booster splashdown",
+        "splashdown of the booster",
+        "ocean splashdown",
+        "booster impact"
+      ]
+    },
+    {
+      "id": "booster_catch",
+      "actionId": "booster_catch",
+      "severity": 9,
+      "patterns": [
+        "tower catch",
+        "catch confirmed",
+        "booster catch",
+        "chopsticks have caught",
+        "caught by the tower"
+      ]
+    },
+    {
+      "id": "seco",
+      "actionId": "seco",
+      "severity": 7,
+      "patterns": [
+        "seco",
+        "ship seco",
+        "ship engine cutoff",
+        "starship engine cutoff"
+      ]
+    },
+    {
+      "id": "deploy_start",
+      "actionId": "deploy_start",
+      "severity": 8,
+      "patterns": [
+        "payload deploy",
+        "payload deployment",
+        "deploy sequence",
+        "satellites deploy",
+        "satellite deploy",
+        "starlink deploy",
+        "deployment sequence"
+      ]
+    },
+    {
+      "id": "deploy_done",
+      "actionId": "deploy_done",
+      "severity": 7,
+      "patterns": [
+        "deploy complete",
+        "deployment complete",
+        "all satellites deployed",
+        "payload deploy complete"
+      ]
+    },
+    {
+      "id": "relight",
+      "actionId": "relight",
+      "severity": 8,
+      "patterns": [
+        "relight",
+        "in-space relight",
+        "in space relight",
+        "engine relight",
+        "raptor relight"
+      ]
+    },
+    {
+      "id": "entry",
+      "actionId": "entry",
+      "severity": 8,
+      "patterns": [
+        "entry interface",
+        "atmospheric entry",
+        "entering the atmosphere",
+        "plasma",
+        "max heating"
+      ]
+    },
+    {
+      "id": "landing_burn_ship",
+      "actionId": "landing_burn_ship",
+      "severity": 8,
+      "patterns": [
+        "ship landing burn",
+        "starship landing burn",
+        "ship's landing burn",
+        "landing burn for the ship"
+      ]
+    },
+    {
+      "id": "ship_splash",
+      "actionId": "ship_splash",
+      "severity": 9,
+      "patterns": [
+        "soft splashdown",
+        "ship splashdown",
+        "starship splashdown",
+        "ship has splashed",
+        "splashdown of the ship"
+      ]
+    },
+    {
+      "id": "success",
+      "actionId": "success",
+      "severity": 6,
+      "cooldownSec": 120,
+      "patterns": [
+        "mission success",
+        "successful test flight",
+        "successful mission",
+        "picture perfect"
+      ]
+    },
+    {
+      "id": "hold",
+      "actionId": "hold",
+      "severity": 8,
+      "patterns": [
+        "we are in a hold",
+        "holding the count",
+        "hold the count",
+        "scrub the launch",
+        "launch scrub",
+        "range abort",
+        "abort the launch"
+      ]
+    },
+    {
+      "id": "go_launch",
+      "actionId": "go",
+      "severity": 7,
+      "patterns": [
+        "go for launch",
+        "verified go for launch",
+        "ld go for launch",
+        "go for propellant load"
+      ]
+    },
+    {
+      "id": "anomaly",
+      "actionId": "anomaly",
+      "severity": 9,
+      "patterns": ["rud", "rapid unscheduled", "anomaly", "lost the vehicle"]
+    }
+  ]
+}
