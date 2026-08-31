@@ -6,13 +6,14 @@
  * 2) Walk mission script milestones
  * 3) POST each to CF TPlus /suggest for admin Approve / Dismiss
  *
+ *   # Liftoff at file 300s; start watching from the beginning of the tape:
  *   npm run webcast:schedule -- \
- *     --video /tmp/roman-window.mp4 \
- *     --mission roman-fh \
- *     --lock-from 100 --lock-to 400 --lock-every 40 \
- *     --sync-file-t 100 \
- *     --suggest-url https://tplus.….workers.dev/suggest \
- *     --suggest-secret "$TPLUS_SUGGEST_SECRET"
+ *     --video /tmp/roman-window.mp4 --mission roman-fh \
+ *     --liftoff-file-sec 300 --sync-file-t 0 --play \
+ *     --suggest-url … --suggest-secret …
+ *
+ *   # If --sync-file-t equals liftoff file time, you are already at T+0
+ *   # (suggests fire immediately) — that is intentional.
  *
  * Dry run (no Telegram):
  *   npm run webcast:schedule -- --video … --mission roman-fh --dry-run
@@ -46,6 +47,7 @@ function parseArgs(argv) {
     suggestUrl: process.env.TPLUS_SUGGEST_URL || null,
     suggestSecret: process.env.TPLUS_SUGGEST_SECRET || null,
     once: false,
+    play: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -65,6 +67,7 @@ function parseArgs(argv) {
     else if (a === "--suggest-secret") out.suggestSecret = next();
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--once") out.once = true;
+    else if (a === "--play") out.play = true;
     else if (a === "--help" || a === "-h") out.help = true;
   }
   return out;
@@ -74,19 +77,29 @@ function usage() {
   console.log(`Usage:
   webcast-schedule --video <mp4> --mission <id> [options]
 
-Clock lock:
+Clock lock (where T+0 is on the file timeline):
   --lock-from/--lock-to/--lock-every   OCR sample window (default 100–400 / 40s)
-  --liftoff-file-sec N                 Skip OCR; use this file offset as T+0
+  --liftoff-file-sec N                 Skip OCR; file offset of liftoff (T+0)
 
-Playback sync:
-  --sync-file-t N   Treat "now" as this file time (default: lock window start).
-                    Wall clock then advances mission T+ in realtime.
+Playback sync (where you are NOW on that file timeline):
+  --sync-file-t N   Wall-clock "now" corresponds to this file second.
+                    Mission T+ = (syncFileT - liftoffFileSec), then advances
+                    with wall time. Default: lock window start (NOT 0).
+
+  Example: liftoff at file 300s, start at beginning of tape:
+    --liftoff-file-sec 300 --sync-file-t 0 --play
+    → you are at T−5:00; liftoff suggest in ~5 minutes of wall clock.
+
+  Anti-example: --sync-file-t 300 with liftoff at 300 → already T+0
+    (first suggest fires immediately).
+
+  --play            Open ffplay at --sync-file-t (realtime) alongside schedule
 
 Emit:
   --lead-sec N      Fire suggest this many seconds before script T+ (default 0)
   --from-tplus N    Skip milestones before this T+
   --to-tplus N      Stop after this T+
-  --once            Emit due milestones once (no sleep) — for testing
+  --once            Emit currently-due milestones only (no sleep) — testing
   --dry-run         Print suggests only
 
 Telegram (CF TPlus):
@@ -94,6 +107,41 @@ Telegram (CF TPlus):
   --suggest-secret SECRET
   (or env TPLUS_SUGGEST_URL / TPLUS_SUGGEST_SECRET)
 `);
+}
+
+function formatMissionClock(tPlusSec) {
+  const sign = tPlusSec < 0 ? "-" : "+";
+  const a = Math.abs(Math.round(tPlusSec));
+  const m = Math.floor(a / 60);
+  const s = a % 60;
+  return `T${sign}${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * Start ffplay at file offset; returns ChildProcess or null.
+ * @param {string} video
+ * @param {number} startSec
+ */
+function startFfplay(video, startSec) {
+  if (!existsSync(video)) return null;
+  // -ss before -i: fast seek; -autoexit when done
+  const child = spawn(
+    "ffplay",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "warning",
+      "-autoexit",
+      "-ss",
+      String(Math.max(0, startSec)),
+      video,
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] },
+  );
+  child.on("error", (err) => {
+    logWarn(`ffplay failed (${err.message}) — install ffmpeg/ffplay or omit --play`);
+  });
+  return child;
 }
 
 function resolveMissionPath(ref) {
@@ -244,17 +292,40 @@ async function main() {
     }
   }
 
+  // Default sync = start of tape (file 0). Pass --sync-file-t if you're
+  // mid-playback. (Older default was lockFrom, which made "just locked"
+  // runs look like they skipped the countdown.)
   const syncFileT =
     args.syncFileT != null && Number.isFinite(args.syncFileT)
       ? args.syncFileT
-      : args.lockFrom;
+      : 0;
   const sync = { syncFileT, syncWallMs: Date.now() };
+  const tNow = missionTPlusNow(lock, sync);
+  const untilLiftoff = lock.liftoffFileSec - syncFileT;
   logInfo(
-    `Sync: wall now = file t=${syncFileT}s → mission ${missionTPlusNow(lock, sync) >= 0 ? "T+" : "T-"}${Math.abs(missionTPlusNow(lock, sync)).toFixed(0)}s`,
+    `Sync: wall now = file t=${syncFileT}s → mission ${formatMissionClock(tNow)}` +
+      (untilLiftoff > 0
+        ? ` · liftoff in ~${untilLiftoff.toFixed(0)}s wall-clock`
+        : untilLiftoff < 0
+          ? ` · already ${formatMissionClock(tNow)} past liftoff`
+          : ` · at liftoff`),
   );
+  if (Math.abs(syncFileT - lock.liftoffFileSec) < 1) {
+    logWarn(
+      "sync-file-t ≈ liftoff-file-sec → you are at T+0; first milestones fire immediately. " +
+        "To replay from T−5:00 with liftoff at file 300s, use --sync-file-t 0 --liftoff-file-sec 300",
+    );
+  }
   logInfo(
     `Mission ${scriptDoc.missionId || args.mission} · ${script.length} milestones · dryRun=${args.dryRun}`,
   );
+
+  /** @type {import('child_process').ChildProcess|null} */
+  let player = null;
+  if (args.play) {
+    logInfo(`Playing video from file t=${syncFileT}s (ffplay)…`);
+    player = startFfplay(resolve(args.video), syncFileT);
+  }
 
   /** @type {object[]} */
   const due = [];
@@ -331,6 +402,13 @@ async function main() {
   }
 
   logInfo("Schedule complete.");
+  if (player && !player.killed) {
+    try {
+      player.kill("SIGTERM");
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 main().catch((err) => {

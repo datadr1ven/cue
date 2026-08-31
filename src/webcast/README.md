@@ -104,14 +104,20 @@ Pair later with ASR + script gate; do not auto-fire on OCR alone.
 npm run webcast:ocr-clock -- --video /tmp/roman-window.mp4 --from 100 --to 400 --every 40 --lock
 
 # Walk roman-fh script; dry-run
+# liftoff at file 300s; start at file 0 → T−5:00, wall-clock waits
 npm run webcast:schedule -- \
   --video /tmp/roman-window.mp4 --mission roman-fh \
-  --liftoff-file-sec 300 --sync-file-t 300 --dry-run --once
+  --liftoff-file-sec 300 --sync-file-t 0 --dry-run --once
 
-# POST suggests to CF TPlus (admin Approve / Dismiss)
+# Replay with video: ffplay from sync point, suggests on wall clock
 export TPLUS_SUGGEST_URL=https://tplus.<account>.workers.dev/suggest
 export TPLUS_SUGGEST_SECRET=…
-npm run webcast:schedule -- --video /tmp/roman-window.mp4 --mission roman-fh
+npm run webcast:schedule -- \
+  --video /tmp/roman-window.mp4 --mission roman-fh \
+  --liftoff-file-sec 300 --sync-file-t 0 --play
+```
+
+`--sync-file-t` is “where the playhead is **now**,” not “where the tape begins in mission time.” If sync == liftoff file time, you are already at T+0.
 ```
 
 ## Live shadow (mark liftoff by hand)
