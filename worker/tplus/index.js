@@ -222,8 +222,6 @@ async function reply(env, chatId, text, extra = {}) {
   });
 }
 
-const KV_SUGGESTS = "suggest:v1";
-
 function suggestSecretOk(env, request) {
   const want = env.TPLUS_SUGGEST_SECRET || env.SUGGEST_SECRET || "";
   if (!want) return false;
@@ -231,18 +229,6 @@ function suggestSecretOk(env, request) {
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   const header = request.headers.get("X-Suggest-Secret") || "";
   return bearer === want || header === want;
-}
-
-function shortSuggestId() {
-  return `${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 5)}`;
-}
-
-async function loadSuggests(kv) {
-  return kvGetJson(kv, KV_SUGGESTS, { pending: {} });
-}
-
-async function saveSuggests(kv, data) {
-  await kvPutJson(kv, KV_SUGGESTS, data);
 }
 
 function normalizeArtifacts(raw) {
@@ -254,80 +240,15 @@ function normalizeArtifacts(raw) {
       kind: a.kind === "voice" || a.kind === "audio" ? "voice" : "photo",
       label: String(a.label || a.id || `artifact ${i}`).slice(0, 40),
       fileId: a.fileId != null ? String(a.fileId) : null,
-      selected: a.defaultOn !== false && a.selected !== false,
+      // defaultOn false → skip unless explicitly selected (legacy)
+      include: a.defaultOn !== false && a.selected !== false,
     }))
-    .filter((a) => a.fileId);
-}
-
-function formatSuggestMessage(s) {
-  const t =
-    s.scriptTPlusSec != null && Number.isFinite(Number(s.scriptTPlusSec))
-      ? `T+${formatTPlus(Number(s.scriptTPlusSec))}`
-      : "T+?—";
-  const sources = (s.evidence?.sources || []).join(", ") || "schedule";
-  const clock = s.evidence?.clock || s.evidence?.clockLock;
-  const clockLine = clock
-    ? clock.tPlusSec != null
-      ? `clock belief: T+${formatTPlus(Number(clock.tPlusSec))} (${clock.source || "ocr"})`
-      : `clock: ${clock.method || "?"} · liftoff@file ${Number(clock.liftoffFileSec).toFixed(0)}s`
-    : null;
-  const asrHits = Array.isArray(s.evidence?.asrHits) ? s.evidence.asrHits : [];
-  const asrLines = asrHits.slice(0, 4).map((h) => {
-    const raw = String(h.raw || h.pattern || "").slice(0, 80);
-    return `asr: ${raw}`;
-  });
-  const scroller = Array.isArray(s.evidence?.scroller) ? s.evidence.scroller : [];
-  const scrollLines = scroller
-    .filter((x) => x.atPresent)
-    .slice(0, 3)
-    .map((x) => `hud: ${String(x.label || "").slice(0, 40)} (at present)`);
-  const arts = normalizeArtifacts(s.artifacts);
-  const artLines =
-    arts.length > 0
-      ? ["artifacts (tap to toggle):", ...arts.map((a) => `${a.selected ? "✅" : "⬜"} ${a.label}`)]
-      : ["artifacts: (none)"];
-  const lines = [
-    `❔ Suggest · ${t} · ${s.label || s.actionId}`,
-    `action: ${s.actionId}`,
-    s.missionId ? `mission: ${s.missionId}` : null,
-    `sources: ${sources}`,
-    clockLine,
-    ...asrLines,
-    ...scrollLines,
-    "",
-    ...artLines,
-    "",
-    "Approve selected → subscribers · Dismiss → drop",
-  ].filter((x) => x != null);
-  return lines.join("\n");
-}
-
-function suggestKeyboard(s) {
-  const id = s.id;
-  const arts = normalizeArtifacts(s.artifacts);
-  const rows = [];
-  let row = [];
-  for (let i = 0; i < arts.length; i++) {
-    const a = arts[i];
-    row.push({
-      text: `${a.selected ? "✅" : "⬜"} ${a.label}`.slice(0, 64),
-      callback_data: `sg:t:${id}:${i}`,
-    });
-    if (row.length === 2) {
-      rows.push(row);
-      row = [];
-    }
-  }
-  if (row.length) rows.push(row);
-  rows.push([
-    { text: "✅ Approve selected", callback_data: `sg:a:${id}` },
-    { text: "✖️ Dismiss", callback_data: `sg:d:${id}` },
-  ]);
-  return { inline_keyboard: rows };
+    .filter((a) => a.fileId && a.include);
 }
 
 /**
- * Laptop/OCR scheduler → admin Approve/Dismiss.
+ * Laptop webcast emitter → immediate fan-out.
+ * Body.mode: "test" (admins only, default) | "ops" (all subscribers).
  * Auth: Bearer TPLUS_SUGGEST_SECRET
  */
 async function handleSuggestPost(request, env, kv) {
@@ -344,163 +265,69 @@ async function handleSuggestPost(request, env, kv) {
   if (!actionId) {
     return new Response('need { "actionId": "…" }', { status: 400 });
   }
+  const modeRaw = String(body.mode || body.audience || "test").toLowerCase();
+  const mode = modeRaw === "ops" || modeRaw === "live" ? "ops" : "test";
   const admins = parseAdminIds(env);
-  if (!admins.length) {
+  if (mode === "test" && !admins.length) {
     return new Response("TELEGRAM_ADMIN_IDS not configured", { status: 500 });
   }
 
-  const id = shortSuggestId();
   const artifacts = normalizeArtifacts(body.artifacts);
-  const suggest = {
-    id,
-    actionId,
-    label: body.label != null ? String(body.label) : actionId,
-    scriptTPlusSec:
-      body.scriptTPlusSec != null && Number.isFinite(Number(body.scriptTPlusSec))
-        ? Number(body.scriptTPlusSec)
-        : null,
-    missionId: body.missionId != null ? String(body.missionId) : null,
-    evidence: body.evidence && typeof body.evidence === "object" ? body.evidence : {},
-    artifacts,
-    createdAt: new Date().toISOString(),
-  };
+  const missionId = body.missionId != null ? String(body.missionId) : null;
+  const evidence =
+    body.evidence && typeof body.evidence === "object" ? body.evidence : {};
 
-  // Optionally switch active mission if scheduler names one we know
-  if (suggest.missionId) {
-    const session = await getSession(env, kv);
-    if (session.scriptDoc?.missionId !== suggest.missionId) {
-      const r = session.loadMission(suggest.missionId);
-      if (r.ok) await persistSession(kv, session);
-    }
-  }
-
-  const store = await loadSuggests(kv);
-  store.pending = store.pending || {};
-  store.pending[id] = suggest;
-  // Cap pending map
-  const ids = Object.keys(store.pending);
-  if (ids.length > 40) {
-    for (const old of ids.slice(0, ids.length - 40)) delete store.pending[old];
-  }
-  await saveSuggests(kv, store);
-
-  const text = formatSuggestMessage(suggest);
-  const markup = suggestKeyboard(suggest);
-  let n = 0;
-  for (const adminId of admins) {
-    const r = await reply(env, adminId, text, { reply_markup: markup });
-    if (r.ok) n += 1;
-    // Do not re-send artifact media here: the laptop already uploaded each
-    // file_id to an admin chat to obtain Telegram file_ids. Re-sending made
-    // duplicate previews ("… liftoff frame" then "event frame").
-  }
-  return Response.json({ ok: true, id, adminsNotified: n, artifacts: artifacts.length });
-}
-
-async function handleSuggestCallback(env, kv, cq, kind, id, artIndex) {
-  const userId = cq.from?.id;
-  const chatId = cq.message?.chat?.id;
-  const store = await loadSuggests(kv);
-  const suggest = store.pending?.[id];
-  if (!suggest) {
-    await tg(env, "answerCallbackQuery", {
-      callback_query_id: cq.id,
-      text: "Already handled or expired",
-      show_alert: true,
-    });
-    if (cq.message?.message_id != null && chatId != null) {
-      await tg(env, "editMessageReplyMarkup", {
-        chat_id: chatId,
-        message_id: cq.message.message_id,
-        reply_markup: { inline_keyboard: [] },
-      });
-    }
-    return;
-  }
-
-  // Toggle artifact selection
-  if (kind === "t") {
-    const arts = normalizeArtifacts(suggest.artifacts);
-    const i = Number(artIndex);
-    if (Number.isFinite(i) && arts[i]) {
-      arts[i].selected = !arts[i].selected;
-      suggest.artifacts = arts;
-      store.pending[id] = suggest;
-      await saveSuggests(kv, store);
-      await tg(env, "answerCallbackQuery", {
-        callback_query_id: cq.id,
-        text: `${arts[i].selected ? "include" : "skip"} ${arts[i].label}`.slice(0, 200),
-      });
-      if (cq.message?.message_id != null && chatId != null) {
-        await tg(env, "editMessageText", {
-          chat_id: chatId,
-          message_id: cq.message.message_id,
-          text: formatSuggestMessage(suggest),
-          reply_markup: suggestKeyboard(suggest),
-        });
-      }
-    } else {
-      await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
-    }
-    return;
-  }
-
-  delete store.pending[id];
-  await saveSuggests(kv, store);
-
-  if (kind === "d") {
-    await tg(env, "answerCallbackQuery", {
-      callback_query_id: cq.id,
-      text: "Dismissed",
-    });
-    if (cq.message?.message_id != null && chatId != null) {
-      await tg(env, "editMessageText", {
-        chat_id: chatId,
-        message_id: cq.message.message_id,
-        text: `✖️ Dismissed · ${suggest.label || suggest.actionId}`,
-      });
-    }
-    return;
-  }
-
-  // Approve → fire + fan-out text + selected artifacts (no admin echo)
   const session = await getSession(env, kv);
-  if (
-    suggest.missionId &&
-    session.scriptDoc?.missionId !== suggest.missionId
-  ) {
-    session.loadMission(suggest.missionId);
+  if (missionId && session.scriptDoc?.missionId !== missionId) {
+    const r = session.loadMission(missionId);
+    if (r.ok) await persistSession(kv, session);
   }
-  const result = await session.fire(suggest.actionId);
+
+  const result = await session.fire(actionId);
   await persistSession(kv, session);
   if (!result.ok) {
-    await tg(env, "answerCallbackQuery", {
-      callback_query_id: cq.id,
-      text: (result.error || "fire failed").slice(0, 200),
-      show_alert: true,
-    });
-    return;
+    return Response.json(
+      { ok: false, error: result.error || "fire failed", mode },
+      { status: 400 },
+    );
   }
-  const alertText = result.alerts[0]?.text || suggest.label || suggest.actionId;
-  const selected = normalizeArtifacts(suggest.artifacts).filter((a) => a.selected);
-  const n = await fanOut(env, kv, alertText, {
-    excludeChatIds: [chatId, userId],
-    artifacts: selected,
-  });
-  await tg(env, "answerCallbackQuery", {
-    callback_query_id: cq.id,
-    text: `Approved → ${n} (+${selected.length} media)`.slice(0, 200),
-  });
-  if (cq.message?.message_id != null && chatId != null) {
-    await tg(env, "editMessageText", {
-      chat_id: chatId,
-      message_id: cq.message.message_id,
-      text:
-        `✅ Approved · ${alertText}\n` +
-        `media: ${selected.map((a) => a.label).join(", ") || "(none)"}\n` +
-        `→ ${n} subscriber(s)`,
-    });
+
+  let alertText = result.alerts[0]?.text || body.label || actionId;
+  if (mode === "test") {
+    alertText = `🧪 TEST · ${alertText}`;
   }
+
+  // Evidence footnote for ops visibility (kept short)
+  const asrHits = Array.isArray(evidence.asrHits) ? evidence.asrHits : [];
+  if (asrHits.length) {
+    const bit = asrHits
+      .slice(0, 2)
+      .map((h) => String(h.raw || h.pattern || "").slice(0, 60))
+      .filter(Boolean)
+      .join(" · ");
+    if (bit) alertText = `${alertText}\n(${bit})`;
+  }
+
+  let n;
+  if (mode === "test") {
+    // Admins only. Skip re-sending artifacts — laptop mint upload already
+    // delivered previews to an admin chat when obtaining file_ids.
+    n = 0;
+    for (const adminId of admins) {
+      const r = await reply(env, adminId, alertText);
+      if (r.ok) n += 1;
+    }
+  } else {
+    n = await fanOut(env, kv, alertText, { artifacts });
+  }
+
+  return Response.json({
+    ok: true,
+    mode,
+    actionId,
+    delivered: n,
+    artifacts: artifacts.length,
+  });
 }
 
 /**
@@ -965,22 +792,19 @@ async function handleCallback(env, kv, cq) {
 
   const data = cq.data || "";
 
-  // Schedule / OCR suggestions: sg:a:<id> | sg:d:<id> | sg:t:<id>:<i>
+  // Legacy Approve/Dismiss keyboards (removed) — ignore gracefully
   if (data.startsWith("sg:")) {
-    const parts = data.split(":");
-    const kind = parts[1];
-    if (kind === "t" && parts[2] != null && parts[3] != null) {
-      await handleSuggestCallback(env, kv, cq, kind, parts[2], parts[3]);
-    } else if ((kind === "a" || kind === "d") && parts[2]) {
-      await handleSuggestCallback(
-        env,
-        kv,
-        cq,
-        kind,
-        parts.slice(2).join(":"),
-      );
-    } else {
-      await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
+    await tg(env, "answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "Approve/Dismiss retired — events auto-send (test|ops mode)",
+      show_alert: true,
+    });
+    if (cq.message?.message_id != null && chatId != null) {
+      await tg(env, "editMessageReplyMarkup", {
+        chat_id: chatId,
+        message_id: cq.message.message_id,
+        reply_markup: { inline_keyboard: [] },
+      });
     }
     return;
   }

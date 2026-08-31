@@ -14,7 +14,7 @@ Subscribers and session state live in **KV**. Mission timelines (Starship, Falco
 | Active mission / T+ clock | KV key `session:v1` |
 | Free-text from users | KV key `inbox:v1` (admin `/inbox` / `/reply`) |
 | Admin inbox pings | KV `inbox:notify:v1` — digest coalesce (~10m quiet window) |
-| Schedule suggests | `POST /suggest` (Bearer `TPLUS_SUGGEST_SECRET`) → admin Approve/Dismiss |
+| Schedule / live emit | `POST /suggest` (Bearer `TPLUS_SUGGEST_SECRET`) · `mode=test` admins only · `mode=ops` all subscribers |
 | New mission timelines | Commit JSON → `npm run validate:missions` → deploy |
 
 Not for OpenF1 MQTT (use a small VPS for GridWhisper/F1 if needed).
@@ -109,34 +109,30 @@ Same path for every vehicle — data-driven `/ops` from the script:
 
 `/ops` shows: always-on `hold` / `go` / `los` / `anomaly` / `success`, then that mission’s script in order.
 
-## Webcast schedule → Approve / Dismiss
+## Webcast emit → test | ops
 
-Laptop locks mission time from OCR (or a manual liftoff file offset), then walks the mission script and POSTs each milestone to the worker. Admins get an inline **Approve / Dismiss**; only Approve fans out.
+Laptop locks mission time (OCR or `--liftoff-file-sec`), walks the script, POSTs each milestone to `/suggest`. **No Approve/Dismiss** — fan-out is immediate:
+
+| `mode` | Audience |
+|--------|----------|
+| `test` (default) | `TELEGRAM_ADMIN_IDS` only (messages prefixed `🧪 TEST`) |
+| `ops` | All subscribers |
 
 ```bash
-# once
 npx wrangler secret put TPLUS_SUGGEST_SECRET
-# paste a long random string; keep for the laptop
 
-# dry-run (no Telegram)
-npm run webcast:schedule -- \
-  --video /tmp/roman-window.mp4 \
-  --mission roman-fh \
-  --liftoff-file-sec 300 \
-  --sync-file-t 300 \
-  --dry-run --once
-
-# live suggests
-export TPLUS_SUGGEST_URL=https://tplus.<account>.workers.dev/suggest
+export TPLUS_SUGGEST_URL=https://tplus.scenicminddigital.workers.dev/suggest
 export TPLUS_SUGGEST_SECRET=…
-npm run webcast:schedule -- \
-  --video /tmp/roman-window.mp4 \
-  --mission roman-fh \
-  --lock-from 100 --lock-to 400 --lock-every 40 \
-  --sync-file-t 100
-```
 
-`evidence.todo` lists fusion hooks (ASR / plume / HUD labels) for later — v1 is schedule + OCR clock lock only.
+# Rehearsal — admins only
+npm run webcast:live -- \
+  --url 'https://x.com/i/broadcasts/…' \
+  --mission starlink-sl-15-23 \
+  --mode test
+
+# Launch night — everyone
+npm run webcast:live -- --url '…' --mission starlink-sl-15-23 --mode ops
+```
 
 ## Migrate existing `data/users.json`
 

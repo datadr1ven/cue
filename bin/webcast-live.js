@@ -4,9 +4,12 @@
  *
  * Park on a broadcast URL (or replay a --video), OCR the mission clock
  * (hold-aware), optionally ASR every ~10s, and POST /suggest when the
- * mission script says a milestone is due — admin Approve/Dismiss (+ artifact toggles).
+ * mission script says a milestone is due.
  *
- *   npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission starlink-sl-17-50
+ *   --mode test  → fan-out to admins only (default, safe for rehearsal)
+ *   --mode ops   → fan-out to all subscribers
+ *
+ *   npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission starlink-sl-15-23 --mode test
  *   npm run webcast:live -- --video /tmp/roman-window.mp4 --mission roman-fh --play --dry-run
  */
 
@@ -43,6 +46,7 @@ function parseArgs(argv) {
     artifacts: true,
     play: false,
     dryRun: false,
+    mode: process.env.TPLUS_MODE || "test", // test | ops
     suggestUrl: process.env.TPLUS_SUGGEST_URL || null,
     suggestSecret: process.env.TPLUS_SUGGEST_SECRET || null,
     telegramToken: process.env.TELEGRAM_TOKEN || null,
@@ -64,22 +68,31 @@ function parseArgs(argv) {
     else if (a === "--no-artifacts") out.artifacts = false;
     else if (a === "--play") out.play = true;
     else if (a === "--dry-run") out.dryRun = true;
+    else if (a === "--mode") out.mode = next();
+    else if (a === "--test") out.mode = "test";
+    else if (a === "--ops") out.mode = "ops";
     else if (a === "--suggest-url") out.suggestUrl = next();
     else if (a === "--suggest-secret") out.suggestSecret = next();
     else if (a === "--sync-file-t") out.syncFileT = Number(next());
     else if (a === "--lead-sec") out.leadSec = Number(next());
     else if (a === "--help" || a === "-h") out.help = true;
   }
+  const m = String(out.mode || "test").toLowerCase();
+  out.mode = m === "ops" || m === "live" ? "ops" : "test";
   return out;
 }
 
 function usage() {
   console.log(`Usage:
-  webcast:live --url <x-broadcast> --mission <id>
-  webcast:live --video <mp4> --mission <id> [--play] [--dry-run]
+  webcast:live --url <x-broadcast> --mission <id> [--mode test|ops]
+  webcast:live --video <mp4> --mission <id> [--play] [--dry-run] [--mode test]
 
 Always-on consumer: park until media/clock available, hold-aware OCR lock,
-schedule suggests to CF /suggest (Approve/Dismiss + artifact toggles).
+POST milestones to CF /suggest for immediate fan-out.
+
+  --mode test   admins only (default; safe rehearsal)
+  --mode ops    all subscribers
+  --test / --ops   aliases
 
 Env: TPLUS_SUGGEST_URL, TPLUS_SUGGEST_SECRET, TELEGRAM_TOKEN, TELEGRAM_ADMIN_IDS
 `);
@@ -319,7 +332,7 @@ async function main() {
   let player = null;
 
   logInfo(
-    `webcast:live mission=${scriptDoc.missionId} dryRun=${args.dryRun} asr=${args.asr} artifacts=${args.artifacts}`,
+    `webcast:live mission=${scriptDoc.missionId} mode=${args.mode} dryRun=${args.dryRun} asr=${args.asr} artifacts=${args.artifacts}`,
   );
 
   // Park until media available
@@ -491,6 +504,7 @@ async function main() {
             label: row.label || row.actionId,
             scriptTPlusSec: Number(row.tPlusSec),
             missionId: scriptDoc.missionId,
+            mode: args.mode,
             evidence: {
               sources: [
                 "schedule",
@@ -517,7 +531,7 @@ async function main() {
           };
 
           logInfo(
-            `SUGGEST ${formatMissionClock(row.tPlusSec)} ${row.actionId} → ${args.dryRun ? "dry-run" : "telegram"}`,
+            `EMIT ${formatMissionClock(row.tPlusSec)} ${row.actionId} → ${args.dryRun ? "dry-run" : args.mode}`,
           );
           if (args.dryRun) {
             console.log(JSON.stringify({ type: "suggest", ...body }));
@@ -527,7 +541,9 @@ async function main() {
               args.suggestSecret,
               body,
             );
-            logInfo(`  posted ${r?.id || "ok"}`);
+            logInfo(
+              `  delivered=${r?.delivered ?? "?"} mode=${r?.mode || args.mode}`,
+            );
           }
         }
       }

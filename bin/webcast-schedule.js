@@ -4,7 +4,7 @@
  *
  * 1) OCR-lock liftoff file offset (or pass --liftoff-file-sec)
  * 2) Walk mission script milestones
- * 3) POST each to CF TPlus /suggest for admin Approve / Dismiss
+ * 3) POST each to CF TPlus /suggest (mode test|ops → immediate fan-out)
  *
  *   # Liftoff at file 300s; start watching from the beginning of the tape:
  *   npm run webcast:schedule -- \
@@ -44,6 +44,7 @@ function parseArgs(argv) {
     fromTPlus: null,
     toTPlus: null,
     dryRun: false,
+    mode: process.env.TPLUS_MODE || "test",
     suggestUrl: process.env.TPLUS_SUGGEST_URL || null,
     suggestSecret: process.env.TPLUS_SUGGEST_SECRET || null,
     once: false,
@@ -66,10 +67,15 @@ function parseArgs(argv) {
     else if (a === "--suggest-url") out.suggestUrl = next();
     else if (a === "--suggest-secret") out.suggestSecret = next();
     else if (a === "--dry-run") out.dryRun = true;
+    else if (a === "--mode") out.mode = next();
+    else if (a === "--test") out.mode = "test";
+    else if (a === "--ops") out.mode = "ops";
     else if (a === "--once") out.once = true;
     else if (a === "--play") out.play = true;
     else if (a === "--help" || a === "-h") out.help = true;
   }
+  const m = String(out.mode || "test").toLowerCase();
+  out.mode = m === "ops" || m === "live" ? "ops" : "test";
   return out;
 }
 
@@ -100,12 +106,14 @@ Emit:
   --from-tplus N    Skip milestones before this T+
   --to-tplus N      Stop after this T+
   --once            Emit currently-due milestones only (no sleep) — testing
-  --dry-run         Print suggests only
+  --dry-run         Print suggests only (no Telegram)
+  --mode test|ops   test=admins only (default); ops=all subscribers
+  --test / --ops    aliases
 
 Telegram (CF TPlus):
   --suggest-url URL
   --suggest-secret SECRET
-  (or env TPLUS_SUGGEST_URL / TPLUS_SUGGEST_SECRET)
+  (or env TPLUS_SUGGEST_URL / TPLUS_SUGGEST_SECRET / TPLUS_MODE)
 `);
 }
 
@@ -350,6 +358,7 @@ async function main() {
       label: ev.label,
       scriptTPlusSec: ev.scriptTPlusSec,
       missionId: scriptDoc.missionId || null,
+      mode: args.mode,
       evidence: {
         sources: ["schedule", ...(lock.fuse?.sources || [])],
         clockLock: {
@@ -397,7 +406,7 @@ async function main() {
 
     const r = await postSuggest(args.suggestUrl, args.suggestSecret, body);
     logInfo(
-      `suggest T+${ev.scriptTPlusSec} ${ev.actionId} → ${r?.id || "ok"} (approve in Telegram)`,
+      `emit T+${ev.scriptTPlusSec} ${ev.actionId} → mode=${r?.mode || args.mode} delivered=${r?.delivered ?? "?"}`,
     );
   }
 
