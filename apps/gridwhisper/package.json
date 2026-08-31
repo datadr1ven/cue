@@ -1,0 +1,38 @@
+{
+  "name": "gridwhisper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GridWhisper — F1 sparse alerts on Cue (MQTT + Cloudflare enroll/deliver)",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "worker": "node bin/worker.js",
+    "worker:live:log": "MQTT_SOURCE=live DELIVERY_MODE=log node bin/worker.js",
+    "worker:live": "MQTT_SOURCE=live DELIVERY_MODE=telegram node bin/worker.js",
+    "worker:live:http": "MQTT_SOURCE=live DELIVERY_MODE=http node bin/worker.js",
+    "worker:local:log": "MQTT_SOURCE=local DELIVERY_MODE=log node bin/worker.js",
+    "worker:local:http": "MQTT_SOURCE=local DELIVERY_MODE=http node bin/worker.js",
+    "capture": "MQTT_SOURCE=live node bin/capture.js",
+    "capture:local": "MQTT_SOURCE=local node bin/capture.js",
+    "download": "node bin/download.js",
+    "bot": "node bin/bot.js",
+    "publish": "node bin/publish-ndjson.js",
+    "smoke": "node bin/smoke-gridwhisper.js",
+    "smoke:inbox": "node bin/smoke-inbox.js",
+    "cf:deploy": "wrangler deploy",
+    "cf:dev": "wrangler dev"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "byline": "^5.0.0",
+    "cue": "*",
+    "mqtt": "^5.15.0",
+    "telegraf": "^4.16.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

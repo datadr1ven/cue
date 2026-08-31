@@ -1,0 +1,30 @@
+# Cloudflare Worker — TPlus (SpaceX launch Telegram bot)
+# Free tier: Workers + KV
+#
+#   npx wrangler login
+#   npx wrangler kv namespace create TPLUS_KV
+#   # paste id below
+#   npx wrangler secret put TELEGRAM_TOKEN
+#   npx wrangler secret put TELEGRAM_ADMIN_IDS
+#   npx wrangler deploy
+#   # set webhook (see docs/cloudflare.md)
+
+name = "tplus"
+main = "worker/index.js"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENROLL_OPEN = "true"
+# Optional: STARSHIP_MISSION = "13"
+# Optional: WEBHOOK_SECRET = "pick-a-long-random-string"
+
+# Create with: npx wrangler kv namespace create TPLUS_KV
+# Then set id from the command output:
+# [[kv_namespaces]]
+# binding = "TPLUS_KV"
+# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+[[kv_namespaces]]
+binding = "TPLUS_KV"
+id = "3971fe561fdd4514836238747293ac8e"

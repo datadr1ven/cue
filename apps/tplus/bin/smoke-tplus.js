@@ -1,0 +1,148 @@
+#!/usr/bin/env node
+/**
+ * Offline smoke: missions + session notes/broadcast/hype/eta without Telegram.
+ *
+ *   npm run smoke:tplus
+ */
+
+import {
+  listMissions,
+  loadMission,
+  validateMissions,
+  formatEta,
+  MISSIONS_ROOT,
+} from "../src/missions/registry.js";
+import {
+  bundledListMissions,
+  bundledLoadMission,
+  bundledIndex,
+} from "../src/missions/bundle.js";
+import { createStarshipSession } from "../src/starship-session-node.js";
+import "../../gridwhisper/bin/smoke-inbox.js";
+
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg);
+}
+
+const v = validateMissions(MISSIONS_ROOT);
+assert(v.ok, `validate failed: ${v.errors.join("; ")}`);
+console.log("✓ mission registry validates");
+
+const list = listMissions();
+assert(list.length >= 2, "expected at least 2 missions");
+console.log(
+  `✓ listMissions: ${list.map((m) => m.id || m.number).join(", ")}`,
+);
+
+const m12 = loadMission(12);
+assert(m12?.doc?.missionId === "starship-flight-12", "load 12");
+const m13 = loadMission(13);
+assert(m13?.doc?.missionId === "starship-flight-13", "load 13");
+const mRoman = loadMission("roman-fh");
+assert(mRoman?.doc?.missionId === "roman-fh", "load roman-fh from filesystem");
+console.log("✓ load by number / id");
+
+// CF Worker path: every index entry must resolve through the in-bundle DOCS map
+const bundled = bundledListMissions();
+assert(bundled.length === list.length, "bundle list length matches registry");
+for (const entry of bundled) {
+  const loaded = bundledLoadMission(entry.id);
+  assert(
+    loaded?.doc?.missionId === entry.id,
+    `bundle missing mission doc for ${entry.id} — import it in src/missions/bundle.js`,
+  );
+}
+assert(
+  bundledIndex.defaultMissionId === "starlink-sl-15-23",
+  "defaultMissionId should be starlink-sl-15-23",
+);
+const bareDefault = bundledLoadMission("default");
+assert(
+  bareDefault?.doc?.missionId === "starlink-sl-15-23",
+  "bundle default → starlink-sl-15-23",
+);
+assert(
+  bareDefault.doc.script?.some((r) => r.actionId === "liftoff"),
+  "default script has liftoff",
+);
+const m1523 = bundledLoadMission("starlink-sl-15-23");
+assert(m1523?.doc?.script?.at(-1)?.actionId === "deploy_start", "sl-15-23 deploy");
+console.log("✓ CF bundle loads every indexed mission (incl. starlink-sl-15-23)");
+
+const session = createStarshipSession({
+  missionRef: 13,
+  minSeverity: 1,
+});
+assert(session.scriptDoc?.missionName, "session has mission");
+
+const alerts = [];
+session.pipeline; // warm
+const s2 = createStarshipSession({
+  missionRef: 13,
+  minSeverity: 1,
+  onAlert: async (a) => alerts.push(a.text),
+});
+
+let r = await s2.fire("liftoff");
+assert(r.ok && r.alerts.length === 1, "liftoff");
+r = await s2.fireNote("Test freeform note from smoke");
+assert(r.ok && /Test freeform/.test(r.alerts[0]?.text || ""), "note");
+r = await s2.fireBroadcast("Smoke broadcast hello");
+assert(r.ok && /broadcast|Smoke/i.test(r.alerts[0]?.text || ""), "broadcast");
+r = await s2.fireHype(48);
+assert(!r.ok, "hype should refuse long-past mission");
+console.log(`✓ hype blocked on past mission: ${r.error}`);
+
+const eta = formatEta(s2.scriptDoc.launchApproxUtc, Date.now(), {
+  missionName: s2.scriptDoc.missionName,
+});
+assert(eta.text, "eta text");
+assert(!/launchApproxUtc|slipped|todo/i.test(eta.text), "no internal jargon in eta");
+assert(
+  eta.kind === "past" || eta.kind === "upcoming" || eta.kind === "recent",
+  `eta kind ${eta.kind}`,
+);
+console.log(`✓ eta sample (${eta.kind}): ${eta.text}`);
+
+const etaMissing = formatEta(null);
+assert(/No upcoming|No launch NET/i.test(etaMissing.text), "missing net copy");
+assert(!/launchApproxUtc/i.test(etaMissing.text), "no field name when missing");
+console.log(`✓ eta missing NET: ${etaMissing.text}`);
+
+const futureIso = new Date(Date.now() + 3 * 864e5).toISOString();
+const etaFuture = formatEta(futureIso, Date.now(), { missionName: "Flight X" });
+assert(etaFuture.kind === "upcoming" && /T−/.test(etaFuture.text), "future eta");
+console.log(`✓ eta upcoming: ${etaFuture.text}`);
+
+s2.loadMission(12);
+assert(s2.scriptDoc.missionId.includes("12"), "switch mission");
+console.log("✓ switch mission 13 → 12");
+
+const browse = s2.formatTimeline(12);
+assert(browse.includes("Liftoff") || browse.includes("liftoff") || browse.length > 20, "timeline");
+console.log("✓ format timeline");
+
+{
+  const {
+    opsActionsForScript,
+    formatOpsButtonLabel,
+    opsInlineKeyboardRows,
+  } = await import("cue/engine/domains/starship/index.js");
+  const roman = bundledLoadMission("roman-fh");
+  const actions = opsActionsForScript(roman.doc.script);
+  const maxQ = actions.find((a) => a.id === "max_q");
+  assert(maxQ?.scriptTPlusSec === 68, "roman max_q T+");
+  assert(
+    formatOpsButtonLabel(maxQ) === "T+1:08 Max Q",
+    `ops label got ${formatOpsButtonLabel(maxQ)}`,
+  );
+  const hold = actions.find((a) => a.id === "hold");
+  assert(formatOpsButtonLabel(hold) === "Hold / scrub", "hold has no T+");
+  const rows = opsInlineKeyboardRows(actions, { columns: 1 });
+  assert(rows.every((r) => r.length === 1), "single-column ops pad");
+  assert(rows.at(-1)?.[0]?.callback_data === "ss:__status", "status row last");
+  console.log("✓ /ops button labels include script T+ (1 column)");
+}
+
+console.log(`✓ alerts fired: ${alerts.length}`);
+console.log("OK smoke:tplus");

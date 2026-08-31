@@ -1,0 +1,41 @@
+{
+  "name": "cue",
+  "version": "0.1.0",
+  "description": "Sparse real-time alerts from timed event streams (core pipeline + domains)",
+  "type": "module",
+  "license": "MIT",
+  "author": "datadr1ven",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/datadr1ven/cue.git",
+    "directory": "packages/cue"
+  },
+  "exports": {
+    "./engine/pipeline.js": "./src/engine/pipeline.js",
+    "./engine/gate.js": "./src/engine/gate.js",
+    "./engine/config.js": "./src/engine/config.js",
+    "./engine/types.js": "./src/engine/types.js",
+    "./engine/ingest/ndjson.js": "./src/engine/ingest/ndjson.js",
+    "./engine/ingest/openf1.js": "./src/engine/ingest/openf1.js",
+    "./engine/domains/f1/index.js": "./src/engine/domains/f1/index.js",
+    "./engine/domains/starship/index.js": "./src/engine/domains/starship/index.js",
+    "./engine/domains/starship/actions.js": "./src/engine/domains/starship/actions.js",
+    "./log.js": "./src/log.js",
+    "./config.js": "./src/config.js",
+    "./users.js": "./src/users.js",
+    "./delivery.js": "./src/delivery.js",
+    "./telegram-inbox.js": "./src/telegram-inbox.js"
+  },
+  "bin": {
+    "cue-replay": "./bin/replay.js"
+  },
+  "scripts": {
+    "replay": "node bin/replay.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1"
+  }
+}

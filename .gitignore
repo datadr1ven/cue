@@ -8,3 +8,19 @@ captures/
 .vscode/
 .wrangler/
 .dev.vars
+
+# Local Python tooling for webcast OCR/ASR
+.venv-webcast/
+
+# Large local race captures / downloads (not vendored)
+dutch-2026/
+testdata/
+latest-artifacts/
+seemingly-good-data/
+
+# Ad-hoc capture dumps at repo root
+/*.ndjson
+
+# Keep curated smoke fixtures
+!packages/cue/examples/**/*.ndjson
+!examples/**/*.ndjson

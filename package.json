@@ -1,7 +1,8 @@
 {
-  "name": "cue",
+  "name": "cue-monorepo",
   "version": "0.1.0",
-  "description": "Real-time sparse event alerts from live streams (F1 domain included)",
+  "private": true,
+  "description": "Cue core + GridWhisper (F1) + TPlus (launches)",
   "type": "module",
   "license": "MIT",
   "author": "datadr1ven",
@@ -9,65 +10,39 @@
     "type": "git",
     "url": "https://github.com/datadr1ven/cue.git"
   },
-  "bugs": {
-    "url": "https://github.com/datadr1ven/cue/issues"
-  },
-  "homepage": "https://github.com/datadr1ven/cue#readme",
-  "keywords": [
-    "alerts",
-    "realtime",
-    "mqtt",
-    "telegram",
-    "f1",
-    "openf1",
-    "events"
+  "workspaces": [
+    "packages/*",
+    "apps/*"
   ],
-  "bin": {
-    "cue-replay": "./bin/replay.js",
-    "cue-worker": "./bin/worker.js",
-    "cue-bot": "./bin/bot.js",
-    "cue-publish": "./bin/publish-ndjson.js"
-  },
   "scripts": {
-    "replay": "node bin/replay.js",
-    "worker": "node bin/worker.js",
-    "worker:live:log": "MQTT_SOURCE=live DELIVERY_MODE=log node bin/worker.js",
-    "worker:live": "MQTT_SOURCE=live DELIVERY_MODE=telegram node bin/worker.js",
-    "worker:live:http": "MQTT_SOURCE=live DELIVERY_MODE=http node bin/worker.js",
-    "worker:local:log": "MQTT_SOURCE=local DELIVERY_MODE=log node bin/worker.js",
-    "worker:local:http": "MQTT_SOURCE=local DELIVERY_MODE=http node bin/worker.js",
-    "capture": "MQTT_SOURCE=live node bin/capture.js",
-    "capture:local": "MQTT_SOURCE=local node bin/capture.js",
-    "download": "node bin/download.js",
-    "bot": "node bin/bot.js",
-    "publish": "node bin/publish-ndjson.js",
-    "starship:ops": "node bin/starship-ops.js",
-    "starship:bot": "node bin/starship-bot.js",
-    "webcast:ocr-clock": ".venv-webcast/bin/python src/webcast/ocr_clock.py",
-    "webcast:schedule": "node bin/webcast-schedule.js",
-    "webcast:live": "node bin/webcast-live.js",
-    "webcast:listen": "node bin/webcast-listen.js",
-    "smoke:webcast": "node bin/smoke-webcast.js",
-    "validate:missions": "node bin/validate-mission.js",
-    "smoke:tplus": "node bin/smoke-tplus.js",
-    "smoke:gridwhisper": "node bin/smoke-gridwhisper.js",
-    "cf:deploy": "wrangler deploy",
-    "cf:deploy:tplus": "wrangler deploy",
-    "cf:deploy:gridwhisper": "wrangler deploy -c wrangler.gridwhisper.toml",
-    "cf:dev": "wrangler dev",
-    "cf:dev:gridwhisper": "wrangler dev -c wrangler.gridwhisper.toml"
+    "replay": "node packages/cue/bin/replay.js",
+    "worker": "npm run worker -w gridwhisper --",
+    "worker:live:log": "npm run worker:live:log -w gridwhisper",
+    "worker:live": "npm run worker:live -w gridwhisper",
+    "worker:live:http": "npm run worker:live:http -w gridwhisper",
+    "worker:local:log": "npm run worker:local:log -w gridwhisper",
+    "worker:local:http": "npm run worker:local:http -w gridwhisper",
+    "capture": "npm run capture -w gridwhisper --",
+    "capture:local": "npm run capture:local -w gridwhisper --",
+    "download": "npm run download -w gridwhisper --",
+    "bot": "npm run bot -w gridwhisper",
+    "publish": "npm run publish -w gridwhisper --",
+    "starship:ops": "npm run starship:ops -w tplus --",
+    "starship:bot": "npm run starship:bot -w tplus --",
+    "webcast:schedule": "npm run webcast:schedule -w tplus --",
+    "webcast:live": "npm run webcast:live -w tplus --",
+    "webcast:listen": "npm run webcast:listen -w tplus --",
+    "smoke:webcast": "npm run smoke:webcast -w tplus",
+    "validate:missions": "npm run validate:missions -w tplus --",
+    "smoke:tplus": "npm run smoke -w tplus",
+    "smoke:gridwhisper": "npm run smoke -w gridwhisper",
+    "smoke:inbox": "npm run smoke:inbox -w gridwhisper",
+    "cf:deploy:tplus": "npm run cf:deploy -w tplus --",
+    "cf:deploy:gridwhisper": "npm run cf:deploy -w gridwhisper --",
+    "cf:dev:tplus": "npm run cf:dev -w tplus --",
+    "cf:dev:gridwhisper": "npm run cf:dev -w gridwhisper --"
   },
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "axios": "^1.6.0",
-    "byline": "^5.0.0",
-    "dotenv": "^17.3.1",
-    "mqtt": "^5.15.0",
-    "telegraf": "^4.16.0"
-  },
-  "devDependencies": {
-    "wrangler": "^4.0.0"
   }
 }

@@ -1,0 +1,31 @@
+{
+  "name": "tplus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TPlus — SpaceX launch sparse alerts on Cue (missions + webcast + Cloudflare)",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "starship:ops": "node bin/starship-ops.js",
+    "starship:bot": "node bin/starship-bot.js",
+    "webcast:ocr-clock": "../../.venv-webcast/bin/python src/webcast/ocr_clock.py",
+    "webcast:schedule": "node bin/webcast-schedule.js",
+    "webcast:live": "node bin/webcast-live.js",
+    "webcast:listen": "node bin/webcast-listen.js",
+    "smoke:webcast": "node bin/smoke-webcast.js",
+    "validate:missions": "node bin/validate-mission.js",
+    "smoke": "node bin/smoke-tplus.js",
+    "cf:deploy": "wrangler deploy",
+    "cf:dev": "wrangler dev"
+  },
+  "dependencies": {
+    "cue": "*",
+    "telegraf": "^4.16.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -2,58 +2,40 @@
 
 **Sparse real-time alerts from timed event streams.**
 
-Cue turns a firehose of structured events into a small set of high-severity **moments**, then renders short template messages for log or Telegram delivery. Sources and domains are pluggable; the core is a single pipeline:
+Cue turns a firehose of structured events into a small set of high-severity **moments**, then renders short template messages for log or Telegram delivery.
 
-**normalize → reduce snapshot → detect moments → gate → render → deliver**
+```text
+normalize → reduce snapshot → detect moments → gate → render → deliver
+```
 
-**License:** MIT  
-**Author:** [datadr1ven](https://github.com/datadr1ven)
+**License:** MIT · **Author:** [datadr1ven](https://github.com/datadr1ven)
 
----
+This repository is an **npm workspaces** monorepo:
 
-## What it is
+| Package / app | Path | What it is |
+|---------------|------|------------|
+| **cue** (core) | [`packages/cue`](./packages/cue/) | Pipeline, gate, domains (`f1`, `starship`), offline replay |
+| **GridWhisper** | [`apps/gridwhisper`](./apps/gridwhisper/) | F1 product — OpenF1 MQTT + CF enroll/`/deliver` |
+| **TPlus** | [`apps/tplus`](./apps/tplus/) | Launch product — missions, webcast:live, CF enroll/`/suggest` |
 
-| Layer | Responsibility |
-|--------|----------------|
-| **Ingest** | Map external records into a common event shape (`type`, `t`, `payload`) |
-| **Domain** | Domain-specific state reduction and moment detection |
-| **Gate** | Severity floor, dedupe, cooldowns |
-| **Render** | Templates by default (no LLM required) |
-| **Deliver** | `log` \| `telegram` \| `none` |
-
-Reference domains in this repository:
-
-| Domain | Primary inputs | Operator path |
-|--------|----------------|---------------|
-| **`f1`** | OpenF1-shaped MQTT / NDJSON | MQTT worker + offline replay |
-| **`starship`** | Manual inject (+ nominal mission script) | CLI keys or Telegram `/ops` |
-
-Downstream apps can brand separately and run one Cue worker instance per domain.
+Architecture notes: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
 ---
 
-## Features
+## Build a variant without GridWhisper or TPlus
 
-- Domain-pluggable moment pipeline with shared gate and delivery  
-- Template rendering; optional LLM hook exists but is off by default  
-- Explicit runtime posture (`MQTT_SOURCE`, `DELIVERY_MODE`) — no silent defaults  
-- Offline file replay for regression and evaluation  
-- Local MQTT publish path for capture-driven integration tests  
-- Telegram: open or closed enrollment (`data/users.json`); admin ids for ops  
-- Human-in-the-loop inject for domains without a public machine feed  
+```bash
+git clone https://github.com/datadr1ven/cue.git
+cd cue && npm install
+cd packages/cue
+npm run replay -- examples/f1/smoke-two-alerts.ndjson
+```
 
----
-
-## Requirements
-
-- Node.js 18+  
-- Telegram bot token when using Telegram delivery or bots  
-- MQTT broker for local worker loops (e.g. Mosquitto)  
-- Upstream credentials only when using a live feed that requires them (e.g. OpenF1 for `f1` + `MQTT_SOURCE=live`)  
+Use only `packages/cue`: add a domain pack, wire your own source + delivery. See [`packages/cue/README.md`](./packages/cue/README.md). You can ignore `apps/*` entirely.
 
 ---
 
-## Install
+## Install (full monorepo)
 
 ```bash
 git clone https://github.com/datadr1ven/cue.git
@@ -62,258 +44,73 @@ cp .env.example .env
 npm install
 ```
 
+Root scripts delegate into workspaces (`npm run replay`, `npm run worker:live:http`, `npm run webcast:live`, …).
+
 ---
 
-## Usage
+## GridWhisper (F1)
 
-### Offline replay (file → stdout)
-
-OpenF1-style NDJSON through the **`f1`** domain:
+MQTT (laptop) → Cue `f1` domain → log / Telegram / `POST` Cloudflare `/deliver`.
 
 ```bash
-# Tiny synthetic sample (2 alerts @ default severity)
-npm run replay -- examples/f1/smoke-two-alerts.ndjson
-
-npm run replay -- path/to/capture.ndjson
-npm run replay -- path/to/capture.ndjson --min-severity 7
-npm run replay -- path/to/capture.ndjson --json
+npm run replay -- packages/cue/examples/f1/smoke-two-alerts.ndjson
+npm run worker:local:log
+npm run smoke:gridwhisper
+npm run cf:deploy:gridwhisper
 ```
 
-See [`examples/f1/`](./examples/f1/) for the GridWhisper-oriented fixture (not a full race dump).
+- App docs: [`apps/gridwhisper/README.md`](./apps/gridwhisper/README.md)  
+- CF: [`apps/gridwhisper/docs/cloudflare.md`](./apps/gridwhisper/docs/cloudflare.md)  
+- Filtering policy (why alerts exist): [`apps/gridwhisper/docs/f1/POLICY.md`](./apps/gridwhisper/docs/f1/POLICY.md)
 
-### MQTT worker (stream → deliver)
+User Telegram commands: `/start` · `/stop` · `/status` · `/help` (+ admin `/note` · `/broadcast` · `/inbox` · `/reply`).
 
-Requires `MQTT_SOURCE` and `DELIVERY_MODE`. Ops logs are prefixed with **wall-clock UTC** (reconnect timing); alert lines still show **event-time** after `⚡`.
+---
 
-| Command | MQTT | Delivery |
-|---------|------|----------|
-| `npm run worker:local:log` | local broker | log |
-| `npm run worker:live:log` | configured live host | log |
-| `npm run worker:live` | configured live host | Telegram |
-| `npm run worker:live:http` | live | CF Worker `/deliver` |
+## TPlus (launches)
 
-```bash
-MQTT_SOURCE=local DELIVERY_MODE=log npm run worker
-```
+Mission timelines in git → Cue `starship` domain → Telegram. Live path: laptop **`webcast:live`** (OCR clock + optional ASR) posts milestones to CF **`/suggest`**.
 
-Default domain is `f1` (`ENGINE_DOMAIN`). Lean topic subscriptions are defined in the MQTT worker for that domain.
-
-### Capture NDJSON (reconnect-safe)
-
-For gold / postmortems. Appends to one file across broker hiccups; 5‑minute heartbeats.
+| Mode | Audience |
+|------|----------|
+| `--mode test` (default) | Admins only (`🧪 TEST`) |
+| `--mode ops` | All subscribers |
 
 ```bash
-# Prefer an explicit path (tmux recommended for race weekends)
-npm run capture -- dutch-2026/sq.ndjson
-
-# Or:
-CAPTURE_OUT=dutch-2026/fp2.ndjson npm run capture
-```
-
-Uses the same OpenF1 live credentials as the worker (`OPENF1_USERNAME` / `OPENF1_PASSWORD`). Ctrl+C flushes and exits.
-
-### Download historical session (REST → NDJSON)
-
-Free OpenF1 historical API — same topics as capture, sorted by event time. No MQTT required.
-
-```bash
-npm run download -- 11348
-npm run download -- 11348 --out dutch-2026/sprint-downloaded.ndjson
-
-ENGINE_SESSION_KIND=sprint npm run replay -- 11348-downloaded.ndjson
-```
-
-Use this to compare against live `*.ndjson` captures or to build a larger offline corpus.
-
-### Publish NDJSON to a local broker
-
-```bash
-# Terminal A: broker
-# Terminal B: npm run worker:local:log
-# Terminal C:
-npm run publish -- path/to/capture.ndjson max
-npm run publish -- path/to/capture.ndjson respect 10
-```
-
-`max` — as fast as possible · `respect` — wall timing from capture timestamps (optional speed multiplier).
-
-### Telegram enrollment
-
-```bash
-npm run bot
-```
-
-Allowlisted users: `/start` appends to `data/users.json`. The worker fans out alerts to that list. Enrollment is separate from domain logic.
-
-### Manual inject (TPlus — SpaceX launches)
-
-For streams without a public event bus, operators mark moments while watching an external source. Mission timelines (Starship, Falcon/Starlink, …) live under `missions/` (git). `/ops` is **mission-scoped** (script milestones + hold/go/anomaly). All subscribers share one notification stream.
-
-```bash
-# Before committing a new flight JSON
 npm run validate:missions
-npm run validate:missions -- missions/flights/starship-flight-14-script.json
 npm run smoke:tplus
-
-# CLI ops
-npm run starship:ops
-npm run starship:ops -- --mission 12
-
-# Telegram (browse + ops + freeform)
-TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id DELIVERY_MODE=telegram npm run starship:bot
+npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission starlink-sl-15-23 --mode test
+npm run cf:deploy:tplus
 ```
 
-| Command | Role |
-|---------|------|
-| `/start` · `/stop` · `/status` · `/help` | Subscribe / unsubscribe / enrollment |
-| `/note` · `/broadcast` | Admin fan-out (optional photo caption) |
-| `/inbox` · `/reply …` | Admin free-text inbox + DM reply (batched pings ~10m) |
-| `POST /suggest` | Laptop `webcast:live` emit (`mode=test\|ops`) |
+- App docs: [`apps/tplus/README.md`](./apps/tplus/README.md)  
+- CF: [`apps/tplus/docs/cloudflare.md`](./apps/tplus/docs/cloudflare.md)  
+- Webcast: [`apps/tplus/src/webcast/README.md`](./apps/tplus/src/webcast/README.md)
 
-The Telegram **/** menu lists user commands only (`start`, `help`, `missions`, `mission`, `eta`, `status`). Ops commands stay off the public menu.
-
-Add a flight: create `missions/flights/….json`, add an entry to `missions/index.json`, run `validate:missions` + `smoke:tplus`, commit.
+User Telegram commands (GW parity): `/start` · `/stop` · `/help` · `/status` · `/missions` · `/mission` · `/eta`.  
+Ops inject via webcast/`/suggest` (no public `/ops` menu).
 
 ---
 
 ## Configuration
 
-See [`.env.example`](./.env.example).
+See [`.env.example`](./.env.example). Important variables:
 
 | Variable | Description |
 |----------|-------------|
-| `MQTT_SOURCE` | `live` \| `local` |
-| `DELIVERY_MODE` | `telegram` \| `log` \| `none` |
-| `TELEGRAM_TOKEN` | Bot API token |
-| `TELEGRAM_ADMIN_IDS` | Ops admins (comma-separated). Alias: `TELEGRAM_ALLOWLIST` |
-| `ENROLL_OPEN` | `true` (default): anyone `/start`s. `false`: admin-only enroll |
-| `SUBSCRIBER_IDS` | Optional seed subscriber ids (file store) |
-| Subscribers | `data/users.json` — delivery targets (not the admin list alone) |
-| `OPENF1_USERNAME` / `OPENF1_PASSWORD` | Live OpenF1 MQTT (`f1` + `MQTT_SOURCE=live`) |
-| `MQTT_LOCAL_HOST` / `MQTT_LOCAL_PORT` | Local broker (default `localhost:1883`) |
-| `ENGINE_DOMAIN` | Domain pack (`f1` \| `starship`, default `f1`) |
-| `ENGINE_MIN_SEVERITY` | Minimum severity 1–9 (default `6`) |
-| `STARSHIP_MISSION` | Default mission ref (number or id) for TPlus bot |
-| `STARSHIP_SCRIPT` | Optional path override for a single mission JSON |
-| `USERS_FILE` | Subscriber store path (default `data/users.json`) |
-
----
-
-## Architecture
-
-```text
-┌──────────────────┐     ┌─────────────────┐     ┌──────────┐     ┌──────────┐
-│ Source adapter   │     │ Domain pack     │     │ Gate     │     │ Delivery │
-│ MQTT · NDJSON ·  │────▶│ snapshot reduce │────▶│ severity │────▶│ log · TG │
-│ manual · …       │     │ moment detect   │     │ dedupe   │     │ none     │
-└──────────────────┘     └─────────────────┘     └──────────┘     └──────────┘
-                                    │
-                               templates
-```
-
-```text
-src/
-  engine/
-    pipeline.js           Shared orchestrator
-    gate.js
-    config.js
-    domains/
-      f1/                 Feed-driven reference domain
-      starship/           Manual-inject reference domain
-    ingest/               Adapters (e.g. OpenF1 normalize, NDJSON reader)
-  missions/               Mission index + load/validate
-  mqtt-worker.js
-  starship-session.js
-  delivery.js
-  users.js
-  config.js
-  runtime.js
-bin/                      CLI entrypoints
-missions/                 Flight timeline JSON + index.json
-examples/                 Legacy copies of sample scripts
-gold/                     Evaluation timelines (optional)
-```
-
-**Defaults:** no LLM; no per-user preference filtering (global moments → all subscribers).
-
-**Extension points**
-
-- **Source:** emit `{ type, t, payload }` (see existing ingest modules).  
-- **Domain:** export `createState`, `reduce`, `detectMoments`, `renderMoment`; register in `pipeline.js`.  
-
----
-
-## Reference domains (summary)
-
-### `f1`
-
-Feed-oriented session coverage (flags, order changes, pits, stewards, session lifecycle; optional team radio at lower severity). Intended input: OpenF1 MQTT or compatible NDJSON captures.
-
-### `starship`
-
-Operator-oriented flight coverage (window, ascent, booster, ship, entry, anomaly). Intended input: human inject via CLI or Telegram; optional nominal T+ script for labeling and clock hints.
-
-Evaluation notes and capture inventories may live under `gold/` for development; they are not required at runtime.
-
----
-
-## TPlus on Cloudflare (free tier)
-
-Persistent hosting for the TPlus launch Telegram bot: **webhook Worker + KV**.
-
-See **[docs/tplus-cloudflare.md](./docs/tplus-cloudflare.md)** for deploy, webhook setup, mission updates, and **git-push autodeploy**.
-
-```bash
-npm run validate:missions && npm run smoke:tplus
-npx wrangler deploy   # manual
-```
-
-**Autodeploy:** add GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.  
-Workflow [`.github/workflows/deploy-tplus.yml`](./.github/workflows/deploy-tplus.yml) deploys on push to `main` when TPlus paths change (worker, missions, starship domain, shared pipeline/gate, package.json — not pure F1 domain files). Prefers an extra deploy over a missed one; use **workflow_dispatch** if only something like `src/engine/config.js` changed.
-
-Local Node polling (`npm run starship:bot`) remains available for development; use one or the other, not both, against the same bot token.
-
----
-
-## GridWhisper on Cloudflare (enroll + deliver)
-
-F1 product surface (rebuild): **webhook Worker + KV** for subscribe/unsubscribe; race-day MQTT stays on a laptop and fans out via `POST /deliver`.
-
-No per-user prefs in v1 — same sparse moment stream for everyone.
-
-See **[docs/gridwhisper-cloudflare.md](./docs/gridwhisper-cloudflare.md)**.
-
-```bash
-npm run smoke:gridwhisper
-npx wrangler deploy -c wrangler.gridwhisper.toml
-```
-
-**Autodeploy:** same GitHub secrets as TPlus (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).  
-Workflow [`.github/workflows/deploy-gridwhisper.yml`](./.github/workflows/deploy-gridwhisper.yml) deploys on push to `main` when Worker paths change (`worker/gridwhisper/**`, wrangler config, command list). F1 engine changes are laptop-only — no CF redeploy.
-
-| Command | Role |
-|---------|------|
-| `/start` · `/stop` | Subscribe / unsubscribe |
-| `/status` · `/help` | Enrollment check · how it works |
-| `/note` · `/broadcast` | Admin fan-out to subscribers |
-| `/inbox` · `/reply …` | Admin: free-text inbox + DM reply (batched admin pings ~10m) |
-| `POST /deliver` | Trusted race-day inject (Bearer `DELIVER_SECRET`) |
-
-Race day on a laptop (MQTT → Cue → Worker fan-out):
-
-```bash
-DELIVER_URL=https://gridwhisper.<account>.workers.dev/deliver \
-DELIVER_SECRET=… \
-npm run worker:live:http
-```
+| `MQTT_SOURCE` | `live` \| `local` (GridWhisper worker) |
+| `DELIVERY_MODE` | `telegram` \| `log` \| `http` \| `none` |
+| `TELEGRAM_TOKEN` / `TELEGRAM_ADMIN_IDS` | Bot + admins |
+| `OPENF1_USERNAME` / `OPENF1_PASSWORD` | Live OpenF1 MQTT |
+| `ENGINE_MIN_SEVERITY` | Gate floor (default `6`) |
+| `DELIVER_URL` / `DELIVER_SECRET` | GridWhisper CF `/deliver` |
+| `TPLUS_SUGGEST_URL` / `TPLUS_SUGGEST_SECRET` | TPlus CF `/suggest` |
 
 ---
 
 ## Disclaimer
 
-Cue is an independent project. It is not affiliated with Formula 1 companies, OpenF1, SpaceX, or other upstream data providers. Third-party marks remain the property of their owners. Use of live feeds and media links is subject to upstream terms.
-
----
+Cue is an independent project. It is not affiliated with Formula 1 companies, OpenF1, SpaceX, or other upstream data providers.
 
 ## License
 
