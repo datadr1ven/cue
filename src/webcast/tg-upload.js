@@ -1,12 +1,15 @@
 /**
  * Upload local media via Telegram Bot API → file_id (for /suggest artifacts).
+ * Sends a silent, caption-less message to mint the file_id (Telegram has no
+ * upload-without-send). Caller may deleteMessage(messageId) after fan-out.
  */
 
 /**
  * @param {string} token
- * @param {number|string} chatId  admin chat to receive quiet preview upload
+ * @param {number|string} chatId  admin chat to receive quiet mint upload
  * @param {string} filePath
  * @param {{ kind?: 'photo'|'voice', label?: string }} [opts]
+ * @returns {Promise<{ fileId: string, messageId: number|null, chatId: number }>}
  */
 export async function uploadTelegramFile(token, chatId, filePath, opts = {}) {
   const kind = opts.kind === "voice" ? "voice" : "photo";
@@ -20,7 +23,7 @@ export async function uploadTelegramFile(token, chatId, filePath, opts = {}) {
   form.append("chat_id", String(chatId));
   form.append(field, blob, basename(filePath));
   form.append("disable_notification", "true");
-  if (opts.label) form.append("caption", String(opts.label).slice(0, 200));
+  // No caption on mint — fan-out uses sendPhoto(caption=alert) as the UX message.
 
   const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
@@ -30,9 +33,28 @@ export async function uploadTelegramFile(token, chatId, filePath, opts = {}) {
   if (!json.ok) {
     throw new Error(json.description || `telegram ${method} failed`);
   }
+  const messageId = json.result?.message_id ?? null;
+  let fileId = null;
   if (kind === "voice") {
-    return json.result?.voice?.file_id || null;
+    fileId = json.result?.voice?.file_id || null;
+  } else {
+    const photos = json.result?.photo || [];
+    fileId = photos.at(-1)?.file_id || null;
   }
-  const photos = json.result?.photo || [];
-  return photos.at(-1)?.file_id || null;
+  if (!fileId) throw new Error("telegram upload returned no file_id");
+  return { fileId, messageId, chatId: Number(chatId) };
+}
+
+/**
+ * @param {string} token
+ * @param {number|string} chatId
+ * @param {number} messageId
+ */
+export async function deleteTelegramMessage(token, chatId, messageId) {
+  if (messageId == null) return;
+  await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+  }).catch(() => {});
 }

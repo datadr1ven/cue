@@ -25,7 +25,10 @@ import {
   gateHitAgainstScript,
   scriptTPlusByAction,
 } from "../src/webcast/match.js";
-import { uploadTelegramFile } from "../src/webcast/tg-upload.js";
+import {
+  uploadTelegramFile,
+  deleteTelegramMessage,
+} from "../src/webcast/tg-upload.js";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const OCR_PY = join(ROOT, "src/webcast/ocr_clock.py");
@@ -52,7 +55,7 @@ function parseArgs(argv) {
     telegramToken: process.env.TELEGRAM_TOKEN || null,
     adminId: process.env.TELEGRAM_ADMIN_IDS?.split(",")[0]?.trim() || null,
     syncFileT: 0,
-    leadSec: 2,
+    leadSec: 0,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -383,63 +386,8 @@ async function main() {
         logInfo("clock — (no HUD / OCR miss)");
       }
 
-      // ASR cadence
-      if (args.asr && wall - lastAsrAt > args.asrEverySec * 1000) {
-        lastAsrAt = wall;
-        try {
-          const asrSs = fileMode
-            ? Math.max(0, (ss || 0) - args.asrEverySec)
-            : null;
-          // live HLS: grab last N seconds is trickier; skip ss
-          await grabAudioWav(
-            media,
-            wavPath,
-            fileMode ? asrSs : null,
-            args.asrEverySec + 2,
-          );
-          const segs = await asrFile(args.python, wavPath);
-          const belief = clock.now(wall);
-          /** @type {Record<string, number>} */
-          let lastHit = {};
-          const hits = [];
-          for (const seg of segs) {
-            const tPlus = belief?.tPlusSec ?? null;
-            const { hits: h, lastHitById } = matchPhrases(seg.text, phrases, {
-              tSec: belief?.tPlusSec ?? 0,
-              lastHitById: lastHit,
-            });
-            lastHit = lastHitById;
-            for (const hit of h) {
-              if (
-                tPlus != null &&
-                hit.actionId &&
-                scriptTPlus.has(hit.actionId)
-              ) {
-                const g = gateHitAgainstScript(hit, {
-                  tPlusSec: tPlus,
-                  scriptTPlus,
-                  gateSec: 90,
-                });
-                if (!g.ok && g.reason === "outside-window") continue;
-              }
-              hits.push({
-                phraseId: hit.phraseId,
-                actionId: hit.actionId,
-                raw: String(hit.raw || "").slice(0, 120),
-                tPlusSec: tPlus,
-              });
-            }
-          }
-          if (hits.length) {
-            recentAsr = [...hits, ...recentAsr].slice(0, 12);
-            logInfo(`asr hits: ${hits.map((h) => h.phraseId).join(", ")}`);
-          }
-        } catch (e) {
-          logWarn(`asr: ${e.message || e}`);
-        }
-      }
-
-      // Schedule emits
+      // Schedule emits BEFORE ASR so the still matches the decision time
+      // (Whisper can take several seconds and drift the HUD vs the alert).
       const belief = clock.now(wall);
       if (belief && Number.isFinite(belief.tPlusSec)) {
         for (const row of script) {
@@ -448,7 +396,6 @@ async function main() {
           if (emitted.has(key)) continue;
           const dueAt = Number(row.tPlusSec) - args.leadSec;
           if (belief.tPlusSec + 0.5 < dueAt) continue;
-          // don't fire far-future if clock jumped wrong
           if (belief.tPlusSec > Number(row.tPlusSec) + 120) continue;
 
           emitted.add(key);
@@ -462,11 +409,15 @@ async function main() {
             .filter((b) =>
               String(b.text || "")
                 .toUpperCase()
-                .includes(String(row.label || row.actionId).slice(0, 6).toUpperCase()),
+                .includes(
+                  String(row.label || row.actionId).slice(0, 6).toUpperCase(),
+                ),
             )
             .map((b) => ({ label: b.text, atPresent: true }));
 
           const artifacts = [];
+          /** @type {{ chatId: number, messageId: number|null }[]} */
+          const mintMsgs = [];
           if (
             args.artifacts &&
             !args.dryRun &&
@@ -474,26 +425,26 @@ async function main() {
             args.adminId
           ) {
             try {
-              // current frame as primary still
+              // Fresh still at emit time (not a frame from before OCR)
               const still = join(work, `art-${key}.jpg`);
-              writeFileSync(still, readFileSync(framePath));
-              const fileId = await uploadTelegramFile(
+              await grabFrame(media, still, ss);
+              const up = await uploadTelegramFile(
                 args.telegramToken,
                 args.adminId,
                 still,
-                { kind: "photo", label: `[artifact] ${row.label || key}` },
+                { kind: "photo" },
               );
-              if (fileId) {
-                artifacts.push({
-                  id: "f0",
-                  kind: "photo",
-                  label: row.label || key,
-                  fileId,
-                  defaultOn: true,
-                });
-              }
-              // TODO: flame onset / T−2 / T+2 / engines-lit classifiers
-              // TODO: audio snippet upload as voice
+              artifacts.push({
+                id: "f0",
+                kind: "photo",
+                label: row.label || key,
+                fileId: up.fileId,
+                defaultOn: true,
+              });
+              mintMsgs.push({
+                chatId: up.chatId,
+                messageId: up.messageId,
+              });
             } catch (e) {
               logWarn(`artifact upload: ${e.message || e}`);
             }
@@ -531,7 +482,8 @@ async function main() {
           };
 
           logInfo(
-            `EMIT ${formatMissionClock(row.tPlusSec)} ${row.actionId} → ${args.dryRun ? "dry-run" : args.mode}`,
+            `EMIT script ${formatMissionClock(row.tPlusSec)} ${row.actionId} ` +
+              `(clock ${formatMissionClock(belief.tPlusSec)}) → ${args.dryRun ? "dry-run" : args.mode}`,
           );
           if (args.dryRun) {
             console.log(JSON.stringify({ type: "suggest", ...body }));
@@ -544,7 +496,72 @@ async function main() {
             logInfo(
               `  delivered=${r?.delivered ?? "?"} mode=${r?.mode || args.mode}`,
             );
+            // Remove silent mint uploads so admin only sees the captioned alert
+            if (args.telegramToken) {
+              for (const m of mintMsgs) {
+                await deleteTelegramMessage(
+                  args.telegramToken,
+                  m.chatId,
+                  m.messageId,
+                );
+              }
+            }
           }
+        }
+      }
+
+      // ASR cadence (evidence only — not shown to users yet)
+      if (args.asr && wall - lastAsrAt > args.asrEverySec * 1000) {
+        lastAsrAt = wall;
+        try {
+          const asrSs = fileMode
+            ? Math.max(0, (ss || 0) - args.asrEverySec)
+            : null;
+          await grabAudioWav(
+            media,
+            wavPath,
+            fileMode ? asrSs : null,
+            args.asrEverySec + 2,
+          );
+          const segs = await asrFile(args.python, wavPath);
+          const beliefNow = clock.now(Date.now());
+          /** @type {Record<string, number>} */
+          let lastHit = {};
+          const hits = [];
+          for (const seg of segs) {
+            const tPlus = beliefNow?.tPlusSec ?? null;
+            const { hits: h, lastHitById } = matchPhrases(seg.text, phrases, {
+              tSec: beliefNow?.tPlusSec ?? 0,
+              lastHitById: lastHit,
+            });
+            lastHit = lastHitById;
+            for (const hit of h) {
+              if (
+                tPlus != null &&
+                hit.actionId &&
+                scriptTPlus.has(hit.actionId)
+              ) {
+                const g = gateHitAgainstScript(hit, {
+                  tPlusSec: tPlus,
+                  scriptTPlus,
+                  gateSec: 90,
+                });
+                if (!g.ok && g.reason === "outside-window") continue;
+              }
+              hits.push({
+                phraseId: hit.phraseId,
+                actionId: hit.actionId,
+                raw: String(hit.raw || "").slice(0, 120),
+                tPlusSec: tPlus,
+              });
+            }
+          }
+          if (hits.length) {
+            recentAsr = [...hits, ...recentAsr].slice(0, 12);
+            logInfo(`asr hits (internal): ${hits.map((h) => h.phraseId).join(", ")}`);
+          }
+        } catch (e) {
+          logWarn(`asr: ${e.message || e}`);
         }
       }
     } catch (e) {

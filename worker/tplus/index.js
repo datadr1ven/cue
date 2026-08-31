@@ -17,6 +17,7 @@
  */
 
 import { createStarshipSession } from "../../src/starship-session.js";
+import { formatTPlus } from "../../src/engine/domains/starship/index.js";
 import {
   bundledLoadMission,
   bundledListMissions,
@@ -301,34 +302,42 @@ async function handleSuggestPost(request, env, kv) {
     );
   }
 
-  let alertText = result.alerts[0]?.text || body.label || actionId;
+  // Prefer script T+ for schedule-driven emits (stable; matches mission card).
+  // Session wall-clock T+ drifts vs OCR/screenshot when fire() lags the HUD.
+  const label =
+    (body.label != null && String(body.label).trim()) ||
+    result.action?.label ||
+    actionId;
+  const scriptT =
+    body.scriptTPlusSec != null && Number.isFinite(Number(body.scriptTPlusSec))
+      ? Number(body.scriptTPlusSec)
+      : result.action?.scriptTPlusSec;
+  const tBit =
+    scriptT != null && Number.isFinite(scriptT)
+      ? `T+${formatTPlus(scriptT)}`
+      : "T+—";
+  const missionName =
+    session.scriptDoc?.missionName || body.missionName || null;
+  const emoji =
+    actionId === "liftoff"
+      ? "🚀"
+      : actionId === "stage_sep" || actionId === "hot_stage"
+        ? "🔥"
+        : "✨";
+  let alertText = missionName
+    ? `${emoji} ${missionName} · ${tBit} — ${label}`
+    : `${emoji} ${tBit} — ${label}`;
   if (mode === "test") {
     alertText = `🧪 TEST · ${alertText}`;
   }
+  // Keep ASR / other weak evidence in the JSON body for logs — do not
+  // surface to subscribers until those signals are sharper.
 
-  // Evidence footnote for ops visibility (kept short)
-  const asrHits = Array.isArray(evidence.asrHits) ? evidence.asrHits : [];
-  if (asrHits.length) {
-    const bit = asrHits
-      .slice(0, 2)
-      .map((h) => String(h.raw || h.pattern || "").slice(0, 60))
-      .filter(Boolean)
-      .join(" · ");
-    if (bit) alertText = `${alertText}\n(${bit})`;
-  }
-
-  let n;
-  if (mode === "test") {
-    // Admins only. Skip re-sending artifacts — laptop mint upload already
-    // delivered previews to an admin chat when obtaining file_ids.
-    n = 0;
-    for (const adminId of admins) {
-      const r = await reply(env, adminId, alertText);
-      if (r.ok) n += 1;
-    }
-  } else {
-    n = await fanOut(env, kv, alertText, { artifacts });
-  }
+  const audience =
+    mode === "test"
+      ? admins
+      : await subscriberIds(kv, env);
+  const n = await fanOutTo(env, audience, alertText, { artifacts });
 
   return Response.json({
     ok: true,
@@ -336,6 +345,7 @@ async function handleSuggestPost(request, env, kv) {
     actionId,
     delivered: n,
     artifacts: artifacts.length,
+    alertText,
   });
 }
 
@@ -345,6 +355,14 @@ async function handleSuggestPost(request, env, kv) {
  */
 async function fanOut(env, kv, text, media = {}) {
   const ids = await subscriberIds(kv, env);
+  return fanOutTo(env, ids, text, media);
+}
+
+/**
+ * @param {number[]} ids
+ * @param {{ photoFileId?: string|null, excludeChatIds?: Array<number|string|null|undefined>, artifacts?: Array<{kind:string,fileId:string,label?:string}> }} [media]
+ */
+async function fanOutTo(env, ids, text, media = {}) {
   const exclude = new Set(
     (media.excludeChatIds || [])
       .map((x) => Number(x))
@@ -352,43 +370,46 @@ async function fanOut(env, kv, text, media = {}) {
   );
   const photoFileId = media.photoFileId || null;
   const artifacts = Array.isArray(media.artifacts) ? media.artifacts : [];
+  const photos = artifacts.filter((a) => a?.fileId && a.kind !== "voice" && a.kind !== "audio");
+  const voices = artifacts.filter((a) => a?.fileId && (a.kind === "voice" || a.kind === "audio"));
+  const primaryPhoto = photoFileId || photos[0]?.fileId || null;
   const caption = String(text || "").slice(0, 1024);
   let n = 0;
   for (const id of ids) {
     if (exclude.has(Number(id))) continue;
     let r;
-    if (photoFileId && artifacts.length === 0) {
+    // One message: photo + alert as caption when we have a still
+    if (primaryPhoto) {
       r = await tg(env, "sendPhoto", {
         chat_id: id,
-        photo: photoFileId,
+        photo: primaryPhoto,
         caption: caption || undefined,
       });
     } else {
       r = await reply(env, id, text);
     }
     if (r.ok) n += 1;
-    for (let i = 0; i < artifacts.length; i++) {
-      const art = artifacts[i];
-      if (!art?.fileId) continue;
-      if (art.kind === "voice" || art.kind === "audio") {
-        await tg(env, "sendVoice", {
-          chat_id: id,
-          voice: art.fileId,
-          caption: art.label || undefined,
-        });
-      } else {
-        await tg(env, "sendPhoto", {
-          chat_id: id,
-          photo: art.fileId,
-          caption: art.label || (i === 0 ? caption : undefined),
-        });
-      }
+    for (const art of photos) {
+      if (art.fileId === primaryPhoto) continue;
+      await tg(env, "sendPhoto", {
+        chat_id: id,
+        photo: art.fileId,
+        caption: art.label || undefined,
+      });
+    }
+    for (const art of voices) {
+      await tg(env, "sendVoice", {
+        chat_id: id,
+        voice: art.fileId,
+        caption: art.label || undefined,
+      });
     }
   }
   return n;
 }
 
 async function ensureCommands(env) {
+  // Refresh menu periodically so clients pick up retired /ops /mission cmds
   if (commandsRegistered) return;
   commandsRegistered = true;
   try {
@@ -397,6 +418,11 @@ async function ensureCommands(env) {
     console.error("setMyCommands failed", e);
     commandsRegistered = false;
   }
+}
+
+async function forceSetCommands(env) {
+  commandsRegistered = false;
+  await ensureCommands(env);
 }
 
 /**
@@ -552,6 +578,7 @@ async function handleMessage(env, kv, message) {
       await reply(env, chatId, "Enrollment is closed.");
       return;
     }
+    await forceSetCommands(env);
     const n = await enrollUser(kv, env, userId, {
       username: message.from?.username || null,
       first_name: message.from?.first_name || null,
@@ -566,6 +593,7 @@ async function handleMessage(env, kv, message) {
   }
 
   if (text.startsWith("/help")) {
+    await forceSetCommands(env);
     await reply(env, chatId, admin ? opsHelp() : userHelp());
     return;
   }
