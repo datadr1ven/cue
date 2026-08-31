@@ -390,24 +390,9 @@ async function handleSuggestPost(request, env, kv) {
   for (const adminId of admins) {
     const r = await reply(env, adminId, text, { reply_markup: markup });
     if (r.ok) n += 1;
-    // Preview media quietly so op can see artifacts before approve
-    for (const art of artifacts) {
-      if (art.kind === "voice") {
-        await tg(env, "sendVoice", {
-          chat_id: adminId,
-          voice: art.fileId,
-          caption: art.label,
-          disable_notification: true,
-        });
-      } else {
-        await tg(env, "sendPhoto", {
-          chat_id: adminId,
-          photo: art.fileId,
-          caption: art.label,
-          disable_notification: true,
-        });
-      }
-    }
+    // Do not re-send artifact media here: the laptop already uploaded each
+    // file_id to an admin chat to obtain Telegram file_ids. Re-sending made
+    // duplicate previews ("… liftoff frame" then "event frame").
   }
   return Response.json({ ok: true, id, adminsNotified: n, artifacts: artifacts.length });
 }
