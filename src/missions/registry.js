@@ -108,10 +108,20 @@ export function loadMission(ref, root) {
 
 export function listMissions(root) {
   const index = loadIndex(root);
-  return index.missions.map((m) => ({
-    ...m,
-    isDefault: m.id === index.defaultMissionId,
-  }));
+  return index.missions.map((m) => {
+    let launchApproxUtc = null;
+    try {
+      const { doc } = loadMissionDoc(m, root);
+      launchApproxUtc = doc?.launchApproxUtc || null;
+    } catch {
+      /* ignore */
+    }
+    return {
+      ...m,
+      isDefault: m.id === index.defaultMissionId,
+      launchApproxUtc,
+    };
+  });
 }
 
 /**

@@ -191,7 +191,7 @@ bot.command("missions", async (ctx) => {
   }
   const list = session.formatMissionList();
   await ctx.reply(
-    `Missions (* = default)\n${list}\n\n/mission — active timeline\n/mission <id|n> — browse\n/mission use <id|n> — switch (admin)`,
+    `Missions (> = active · * = default)\n${list}\n\n/mission — active timeline\n/mission <id|n> — browse\n/mission use <id|n> — switch (admin)`,
   );
 });
 

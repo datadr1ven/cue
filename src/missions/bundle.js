@@ -34,10 +34,14 @@ function docForEntry(entry) {
 }
 
 export function bundledListMissions() {
-  return (index.missions || []).map((m) => ({
-    ...m,
-    isDefault: m.id === index.defaultMissionId,
-  }));
+  return (index.missions || []).map((m) => {
+    const doc = DOCS[m.id];
+    return {
+      ...m,
+      isDefault: m.id === index.defaultMissionId,
+      launchApproxUtc: doc?.launchApproxUtc || null,
+    };
+  });
 }
 
 export function bundledResolveRef(ref) {

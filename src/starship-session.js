@@ -276,16 +276,27 @@ export function createStarshipSession(opts = {}) {
   }
 
   function formatMissionList() {
-    return listMissionsFn()
+    const activeId = scriptDoc?.missionId || null;
+    const rows = [...(listMissionsFn() || [])].sort((a, b) => {
+      const ta = Date.parse(a.launchApproxUtc || "") || 0;
+      const tb = Date.parse(b.launchApproxUtc || "") || 0;
+      if (ta !== tb) return ta - tb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    return rows
       .map((m) => {
-        const mark = m.isDefault ? "*" : " ";
+        // > = active session · * = catalog default (may differ from active)
+        const mark =
+          m.id === activeId ? ">" : m.isDefault ? "*" : " ";
         const num =
           m.number != null && Number.isFinite(Number(m.number))
             ? String(m.number)
             : null;
-        // Always show id so /mission <id> works when there is no flight number
         const ref = num != null ? `${num} · ${m.id}` : m.id;
-        return `${mark} ${ref}  ${m.label || m.id}`;
+        const when = m.launchApproxUtc
+          ? ` · ${String(m.launchApproxUtc).slice(0, 10)}`
+          : "";
+        return `${mark} ${ref}  ${m.label || m.id}${when}`;
       })
       .join("\n");
   }

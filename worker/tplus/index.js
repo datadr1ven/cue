@@ -752,7 +752,8 @@ async function handleMessage(env, kv, message) {
     await reply(
       env,
       chatId,
-      `Missions (* = default)\n${session.formatMissionList()}\n\n` +
+      `Missions (> = active · * = default)\n` +
+        `${session.formatMissionList()}\n\n` +
         `/mission — active timeline\n` +
         `/mission <id|n> — browse\n` +
         `/mission use <id|n> — switch (admin)`,
