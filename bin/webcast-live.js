@@ -364,21 +364,151 @@ async function main() {
 
   const framePath = join(work, "frame.jpg");
   const wavPath = join(work, "snip.wav");
+  /** When set, next loop iteration skips OCR and emits immediately at scheduled T+. */
+  let precisionWake = null; // { actionId, scriptTPlusSec, label }
+
+  /**
+   * Emit one milestone with a still grabbed at *this* wall/file time.
+   * @param {object} row
+   * @param {object} belief
+   * @param {number|null} ss
+   * @param {object} ocrSnap
+   */
+  async function emitRow(row, belief, ss, ocrSnap) {
+    const key = row.actionId;
+    if (emitted.has(key)) return;
+    emitted.add(key);
+
+    const asrHits = recentAsr.filter(
+      (h) =>
+        h.actionId === row.actionId ||
+        (h.tPlusSec != null && Math.abs(h.tPlusSec - row.tPlusSec) < 90),
+    );
+    const scroller = (ocrSnap?.scrollerPresent || [])
+      .filter((b) =>
+        String(b.text || "")
+          .toUpperCase()
+          .includes(String(row.label || row.actionId).slice(0, 6).toUpperCase()),
+      )
+      .map((b) => ({ label: b.text, atPresent: true }));
+
+    const artifacts = [];
+    /** @type {{ chatId: number, messageId: number|null }[]} */
+    const mintMsgs = [];
+    if (
+      args.artifacts &&
+      !args.dryRun &&
+      args.telegramToken &&
+      args.adminId
+    ) {
+      try {
+        const still = join(work, `art-${key}.jpg`);
+        // Grab NOW — this is the scheduled moment
+        await grabFrame(media, still, ss);
+        const up = await uploadTelegramFile(
+          args.telegramToken,
+          args.adminId,
+          still,
+          { kind: "photo" },
+        );
+        artifacts.push({
+          id: "f0",
+          kind: "photo",
+          label: row.label || key,
+          fileId: up.fileId,
+          defaultOn: true,
+        });
+        mintMsgs.push({ chatId: up.chatId, messageId: up.messageId });
+      } catch (e) {
+        logWarn(`artifact upload: ${e.message || e}`);
+      }
+    }
+
+    const body = {
+      actionId: row.actionId,
+      label: row.label || row.actionId,
+      scriptTPlusSec: Number(row.tPlusSec),
+      missionId: scriptDoc.missionId,
+      mode: args.mode,
+      evidence: {
+        sources: [
+          "schedule",
+          "ocr_clock",
+          ...(asrHits.length ? ["asr"] : []),
+          ...(scroller.length ? ["hud_scroller"] : []),
+        ],
+        clock: {
+          tPlusSec: belief.tPlusSec,
+          source: belief.source,
+          stallMs: belief.stallMs,
+          confidence: belief.confidence,
+        },
+        asrHits,
+        scroller,
+        todo: [
+          "vision_stage_sep",
+          "plume_flame_onset",
+          "telemetry_engines",
+          "audio_clip_artifact",
+        ],
+      },
+      artifacts,
+    };
+
+    logInfo(
+      `EMIT script ${formatMissionClock(row.tPlusSec)} ${row.actionId} ` +
+        `(clock ${formatMissionClock(belief.tPlusSec)}) → ${args.dryRun ? "dry-run" : args.mode}`,
+    );
+    if (args.dryRun) {
+      console.log(JSON.stringify({ type: "suggest", ...body }));
+      return;
+    }
+    const r = await postSuggest(args.suggestUrl, args.suggestSecret, body);
+    logInfo(`  delivered=${r?.delivered ?? "?"} mode=${r?.mode || args.mode}`);
+    if (args.telegramToken) {
+      for (const m of mintMsgs) {
+        await deleteTelegramMessage(
+          args.telegramToken,
+          m.chatId,
+          m.messageId,
+        );
+      }
+    }
+  }
 
   logInfo("Entering observe loop (Ctrl+C to stop)");
 
   for (;;) {
     const wall = Date.now();
     try {
-      // Frame position: live = tip; file = sync + elapsed
       let ss = null;
       if (fileMode) {
         ss = syncFileT + (wall - syncWallMs) / 1000;
       }
+
+      // Precision wake: grab+emit NOW using coasted clock — do not wait on OCR
+      // (OCR alone is ~1–2s and was the remaining cadence lag).
+      if (precisionWake) {
+        const target = precisionWake;
+        precisionWake = null;
+        const belief = clock.now(wall);
+        if (belief && !emitted.has(target.actionId)) {
+          const row = script.find((r) => r.actionId === target.actionId);
+          if (row) {
+            logInfo(
+              `precision wake ${target.actionId} @ clock ${formatMissionClock(belief.tPlusSec)}`,
+            );
+            await emitRow(row, belief, ss, {});
+          }
+        }
+        // Fall through to OCR resync on this same iteration
+      }
+
       await grabFrame(media, framePath, ss);
       const ocr = await ocrImage(args.python, framePath);
+      const ocrWall = Date.now();
       if (ocr.ok && ocr.clockSec != null) {
-        const b = clock.updateFromOcr(ocr.clockSec, wall);
+        const b = clock.updateFromOcr(ocr.clockSec, ocrWall);
         const stall =
           b.stallMs > 8000 ? ` HOLD~${(b.stallMs / 1000).toFixed(0)}s` : "";
         logInfo(`clock ${formatMissionClock(b.tPlusSec)} (${b.source})${stall}`);
@@ -386,127 +516,19 @@ async function main() {
         logInfo("clock — (no HUD / OCR miss)");
       }
 
-      // Schedule emits BEFORE ASR so the still matches the decision time
-      // (Whisper can take several seconds and drift the HUD vs the alert).
-      const belief = clock.now(wall);
+      // Catch-up emits (overdue while we were OCRing / after hold)
+      const belief = clock.now(Date.now());
       if (belief && Number.isFinite(belief.tPlusSec)) {
         for (const row of script) {
           if (row?.actionId == null || row.tPlusSec == null) continue;
-          const key = row.actionId;
-          if (emitted.has(key)) continue;
+          if (emitted.has(row.actionId)) continue;
           const dueAt = Number(row.tPlusSec) - args.leadSec;
-          if (belief.tPlusSec + 0.5 < dueAt) continue;
+          if (belief.tPlusSec + 0.35 < dueAt) continue;
           if (belief.tPlusSec > Number(row.tPlusSec) + 120) continue;
-
-          emitted.add(key);
-          const asrHits = recentAsr.filter(
-            (h) =>
-              h.actionId === row.actionId ||
-              (h.tPlusSec != null &&
-                Math.abs(h.tPlusSec - row.tPlusSec) < 90),
-          );
-          const scroller = (ocr.scrollerPresent || [])
-            .filter((b) =>
-              String(b.text || "")
-                .toUpperCase()
-                .includes(
-                  String(row.label || row.actionId).slice(0, 6).toUpperCase(),
-                ),
-            )
-            .map((b) => ({ label: b.text, atPresent: true }));
-
-          const artifacts = [];
-          /** @type {{ chatId: number, messageId: number|null }[]} */
-          const mintMsgs = [];
-          if (
-            args.artifacts &&
-            !args.dryRun &&
-            args.telegramToken &&
-            args.adminId
-          ) {
-            try {
-              // Fresh still at emit time (not a frame from before OCR)
-              const still = join(work, `art-${key}.jpg`);
-              await grabFrame(media, still, ss);
-              const up = await uploadTelegramFile(
-                args.telegramToken,
-                args.adminId,
-                still,
-                { kind: "photo" },
-              );
-              artifacts.push({
-                id: "f0",
-                kind: "photo",
-                label: row.label || key,
-                fileId: up.fileId,
-                defaultOn: true,
-              });
-              mintMsgs.push({
-                chatId: up.chatId,
-                messageId: up.messageId,
-              });
-            } catch (e) {
-              logWarn(`artifact upload: ${e.message || e}`);
-            }
-          }
-
-          const body = {
-            actionId: row.actionId,
-            label: row.label || row.actionId,
-            scriptTPlusSec: Number(row.tPlusSec),
-            missionId: scriptDoc.missionId,
-            mode: args.mode,
-            evidence: {
-              sources: [
-                "schedule",
-                "ocr_clock",
-                ...(asrHits.length ? ["asr"] : []),
-                ...(scroller.length ? ["hud_scroller"] : []),
-              ],
-              clock: {
-                tPlusSec: belief.tPlusSec,
-                source: belief.source,
-                stallMs: belief.stallMs,
-                confidence: belief.confidence,
-              },
-              asrHits,
-              scroller,
-              todo: [
-                "vision_stage_sep",
-                "plume_flame_onset",
-                "telemetry_engines",
-                "audio_clip_artifact",
-              ],
-            },
-            artifacts,
-          };
-
-          logInfo(
-            `EMIT script ${formatMissionClock(row.tPlusSec)} ${row.actionId} ` +
-              `(clock ${formatMissionClock(belief.tPlusSec)}) → ${args.dryRun ? "dry-run" : args.mode}`,
-          );
-          if (args.dryRun) {
-            console.log(JSON.stringify({ type: "suggest", ...body }));
-          } else {
-            const r = await postSuggest(
-              args.suggestUrl,
-              args.suggestSecret,
-              body,
-            );
-            logInfo(
-              `  delivered=${r?.delivered ?? "?"} mode=${r?.mode || args.mode}`,
-            );
-            // Remove silent mint uploads so admin only sees the captioned alert
-            if (args.telegramToken) {
-              for (const m of mintMsgs) {
-                await deleteTelegramMessage(
-                  args.telegramToken,
-                  m.chatId,
-                  m.messageId,
-                );
-              }
-            }
-          }
+          const ssNow = fileMode
+            ? syncFileT + (Date.now() - syncWallMs) / 1000
+            : null;
+          await emitRow(row, belief, ssNow, ocr);
         }
       }
 
@@ -558,7 +580,9 @@ async function main() {
           }
           if (hits.length) {
             recentAsr = [...hits, ...recentAsr].slice(0, 12);
-            logInfo(`asr hits (internal): ${hits.map((h) => h.phraseId).join(", ")}`);
+            logInfo(
+              `asr hits (internal): ${hits.map((h) => h.phraseId).join(", ")}`,
+            );
           }
         } catch (e) {
           logWarn(`asr: ${e.message || e}`);
@@ -566,7 +590,6 @@ async function main() {
       }
     } catch (e) {
       logWarn(`loop: ${e.message || e}`);
-      // live URL may rotate — re-probe occasionally
       if (!fileMode && args.url) {
         try {
           media = await probeMediaUrl(args.url);
@@ -576,33 +599,34 @@ async function main() {
       }
     }
 
-    // Sleep until the next script milestone (locked clock) or the OCR poll —
-    // whichever is sooner — so grab+emit land on the anticipated T+, not
-    // only on the 5s sampling grid. Holds: keep polling OCR on cadence.
+    // Sleep until next milestone (precision wake) or OCR poll. Holds → OCR cadence.
     let sleepSec = args.ocrEverySec;
+    precisionWake = null;
     const beliefForSleep = clock.now(Date.now());
     if (
       beliefForSleep &&
       Number.isFinite(beliefForSleep.tPlusSec) &&
       (beliefForSleep.stallMs || 0) < 8000
     ) {
-      let nextDue = null;
       for (const row of script) {
         if (row?.actionId == null || row.tPlusSec == null) continue;
         if (emitted.has(row.actionId)) continue;
         const dueAt = Number(row.tPlusSec) - args.leadSec;
         const until = dueAt - beliefForSleep.tPlusSec;
-        if (until > 0.05) {
-          nextDue = { row, until };
+        if (until > 0.05 && until < sleepSec) {
+          // Wake exactly at scheduled T+; grab+emit runs *before* OCR.
+          sleepSec = Math.max(0.05, until);
+          precisionWake = {
+            actionId: row.actionId,
+            scriptTPlusSec: Number(row.tPlusSec),
+            label: row.label || row.actionId,
+          };
+          logInfo(
+            `next ${row.actionId} in ${until.toFixed(2)}s ` +
+              `(script ${formatMissionClock(row.tPlusSec)}) — precision wake`,
+          );
           break;
         }
-      }
-      if (nextDue && nextDue.until < sleepSec) {
-        sleepSec = Math.max(0.05, nextDue.until);
-        logInfo(
-          `next ${nextDue.row.actionId} in ${nextDue.until.toFixed(1)}s ` +
-            `(script ${formatMissionClock(nextDue.row.tPlusSec)}) — wake for grab+emit`,
-        );
       }
     }
     await sleep(sleepSec * 1000);
