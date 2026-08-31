@@ -2,8 +2,12 @@
 
 Always-on laptop process pointed at a SpaceX broadcast (or a saved VOD).  
 OCR locks the mission clock (hold-aware), optional ASR adds weak evidence,  
-script milestones POST to CF **`/suggest`** → admin **Approve / Dismiss** with  
-**artifact toggles** (choose which photos/audio fan out).
+script milestones POST to CF **`/suggest`** for **immediate fan-out**:
+
+| Flag | Audience |
+|------|----------|
+| `--mode test` (default) | Admins only (`🧪 TEST` prefix) |
+| `--mode ops` | All subscribers |
 
 ## Setup
 
@@ -14,35 +18,33 @@ python3 -m venv .venv-webcast
 # ffmpeg + ffplay on PATH
 ```
 
-Secrets / env for live suggests:
-
 ```bash
 export TPLUS_SUGGEST_URL=https://tplus.scenicminddigital.workers.dev/suggest
 export TPLUS_SUGGEST_SECRET=…          # wrangler secret put TPLUS_SUGGEST_SECRET
-export TELEGRAM_TOKEN=…                # same bot — artifact upload → file_id
+export TELEGRAM_TOKEN=…                # artifact upload → file_id (ops media)
 export TELEGRAM_ADMIN_IDS=your_numeric_id
 ```
 
-## Live (launch day)
+## Live / rehearsal
 
 ```bash
+# Safe rehearsal — admins only
 npm run webcast:live -- \
   --url 'https://x.com/i/broadcasts/1yKAPwXpMlqxb' \
-  --mission starlink-sl-17-50
-```
+  --mission starlink-sl-15-23 \
+  --mode test
 
-- Parks until HLS/media exists  
-- OCR every ~5s; stalls detected as holds  
-- ASR every ~10s → evidence on suggest cards  
-- Artifacts: current frame uploaded as toggleable photo (more hooks TODO)
+# Launch night — everyone
+npm run webcast:live -- \
+  --url 'https://x.com/i/broadcasts/1yKAPwXpMlqxb' \
+  --mission starlink-sl-15-23 \
+  --mode ops
 
-Dry-run / rehearsal on a file:
-
-```bash
+# Local dry-run (no Telegram)
 npm run webcast:live -- \
   --video /tmp/roman-window.mp4 \
   --mission roman-fh \
-  --play --dry-run
+  --sync-file-t 275 --play --dry-run
 ```
 
 ## Other tools
@@ -50,18 +52,13 @@ npm run webcast:live -- \
 | Script | Role |
 |--------|------|
 | `webcast:ocr-clock` | Sample VOD frames / `--image` / `--lock` / `--show` HTML |
-| `webcast:schedule` | File clock-lock then wall-clock script emit (no live park) |
+| `webcast:schedule` | File clock-lock then wall-clock emit (`--mode test\|ops`) |
 | `webcast:listen` | Offline ASR phrase spotter |
 
 ## Weak indicators (v0)
 
 1. **Schedule + OCR clock** — primary  
-2. **ASR phrases** — evidence bullets  
-3. **HUD scroller “at present”** — OCR boxes in bottom mid band (heuristic)  
-4. **Vision classifiers / telemetry** — TODO hooks in `evidence.todo`  
-5. **Artifacts** — op toggles ✅/⬜ before Approve  
-
-## Approve UI
-
-Telegram: toggle artifact buttons, then **Approve selected** or **Dismiss**.  
-Subscribers get alert text + only selected media.
+2. **ASR phrases** — short footnote on the alert when present  
+3. **HUD scroller “at present”** — heuristic  
+4. **Vision / telemetry** — TODO hooks  
+5. **Artifacts** — still uploaded for `file_id` minting; included on **ops** fan-out (test skips re-send to avoid dupes with mint)
