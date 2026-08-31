@@ -5,12 +5,10 @@
 
 /** @type {{ command: string, description: string }[]} */
 export const TPLUS_USER_COMMANDS = [
-  { command: "start", description: "Subscribe to flight alerts" },
+  { command: "start", description: "Subscribe to launch alerts" },
   { command: "help", description: "How TPlus works" },
-  { command: "missions", description: "List flight timelines" },
-  { command: "mission", description: "Browse a flight timeline" },
-  { command: "eta", description: "Time until launch NET" },
-  { command: "status", description: "Flight clock / phase" },
+  { command: "status", description: "Subscription status" },
+  { command: "stop", description: "Unsubscribe from alerts" },
 ];
 
 /**

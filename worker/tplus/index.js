@@ -1,22 +1,23 @@
 /**
- * Cloudflare Worker — TPlus Telegram webhook (free tier).
+ * Cloudflare Worker — TPlus Telegram (enroll + deliver shell).
+ *
+ * Always-on: /start · /help · /status · /stop · inbox.
+ * Admins: /note · /broadcast · /inbox · /reply
+ * Launch events: laptop webcast:live → POST /suggest (test|ops).
  *
  * Bindings (wrangler.toml):
  *   KV  TPLUS_KV
  * Secrets:
  *   TELEGRAM_TOKEN
  *   TELEGRAM_ADMIN_IDS   (comma-separated)
+ *   TPLUS_SUGGEST_SECRET
  * Vars:
  *   ENROLL_OPEN=true
  *   WEBHOOK_SECRET       (optional path secret)
  */
 
 import { createStarshipSession } from "../../src/starship-session.js";
-import {
-  formatTPlus,
-  opsActionsForScript,
-  opsInlineKeyboardRows,
-} from "../../src/engine/domains/starship/index.js";
+import { formatTPlus } from "../../src/engine/domains/starship/index.js";
 import {
   bundledLoadMission,
   bundledListMissions,
@@ -183,6 +184,15 @@ async function enrollUser(kv, env, userId, meta = {}) {
   };
   await saveUsers(kv, data);
   return Object.keys(data.users).length;
+}
+
+async function unenrollUser(kv, userId) {
+  const data = await loadUsers(kv);
+  const id = String(userId);
+  const existed = Boolean(data.users[id]);
+  delete data.users[id];
+  await saveUsers(kv, data);
+  return { existed, n: Object.keys(data.users).length };
 }
 
 async function subscriberIds(kv, env) {
@@ -445,24 +455,13 @@ async function persistSession(kv, session) {
   await kvPutJson(kv, KV_SESSION, session.exportState());
 }
 
-/**
- * Mission-scoped ops pad: always-on (hold/go/anomaly/…) + active script.
- * @param {object|null|undefined} session
- */
-function opsKeyboard(session) {
-  const script = session?.scriptDoc?.script || [];
-  const actions = opsActionsForScript(script);
-  return { inline_keyboard: opsInlineKeyboardRows(actions, { columns: 1 }) };
-}
-
 function userHelp() {
   return (
     `TPlus — sparse SpaceX launch alerts\n\n` +
-    `/missions — list missions\n` +
-    `/mission — active mission timeline\n` +
-    `/mission <id|n> — browse nominal T+\n` +
-    `/eta — countdown to NET\n` +
-    `/status — flight clock\n` +
+    `High-signal milestones from the live webcast worker (test or ops mode).\n\n` +
+    `/start — subscribe\n` +
+    `/status — am I subscribed?\n` +
+    `/stop — unsubscribe\n` +
     `/help — this message\n\n` +
     `Unofficial; not affiliated with SpaceX.`
   );
@@ -472,15 +471,13 @@ function opsHelp() {
   return (
     userHelp() +
     `\n\nOps (admin)\n` +
-    `/ops — mission milestones + hold/go/anomaly\n` +
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
-    `/hype <hours>\n` +
-    `/mission use <id|n> — switch active mission\n` +
     `/inbox — read free-text messages from users\n` +
     `/inbox clear — wipe inbox\n` +
     `/reply last <text> — DM the last inbox user\n` +
     `/reply <userId|@user> <text> — DM that user\n` +
+    `(launch events: laptop webcast:live → POST /suggest)\n` +
     `(new inbox messages ping admins; batched ~10m)`
   );
 }
@@ -560,11 +557,10 @@ async function handleMessage(env, kv, message) {
       username: message.from?.username || null,
       first_name: message.from?.first_name || null,
     });
-    const st = session.status();
     await reply(
       env,
       chatId,
-      `Subscribed to TPlus (${n} subscribers).\nActive: ${st.missionName || "—"}\n\n` +
+      `Subscribed to TPlus (${n} subscriber${n === 1 ? "" : "s"}).\n\n` +
         (admin ? opsHelp() : userHelp()),
     );
     return;
@@ -575,82 +571,56 @@ async function handleMessage(env, kv, message) {
     return;
   }
 
-  if (text.startsWith("/missions")) {
+  if (text.startsWith("/status")) {
+    const data = await loadUsers(kv);
+    const me = data.users[String(userId)];
+    const total = Object.keys(data.users).length;
+    if (!me) {
+      await reply(
+        env,
+        chatId,
+        `Not subscribed. /start to join.\n(${total} subscriber${total === 1 ? "" : "s"} total)`,
+      );
+      return;
+    }
     await reply(
       env,
       chatId,
-      `Missions (> = active · * = default)\n` +
-        `${session.formatMissionList()}\n\n` +
-        `/mission — active timeline\n` +
-        `/mission <id|n> — browse\n` +
-        `/mission use <id|n> — switch (admin)`,
+      `Subscribed since ${me.enrolledAt || "—"}\n` +
+        `role: ${me.role || "subscriber"}\n` +
+        `total subscribers: ${total}`,
     );
     return;
   }
 
-  if (text.startsWith("/mission")) {
-    const raw = stripCmd(text, "mission");
-    if (!raw) {
-      // Bare /mission → active mission nominal timeline
-      const body = session.formatTimeline(null);
-      await reply(
-        env,
-        chatId,
-        body.length > 3500 ? body.slice(0, 3500) + "\n…" : body,
-      );
+  if (text.startsWith("/stop")) {
+    const { existed, n } = await unenrollUser(kv, userId);
+    if (!existed) {
+      await reply(env, chatId, "You were not subscribed.");
       return;
     }
-    if (raw.toLowerCase().startsWith("use ")) {
-      if (!admin) {
-        await reply(env, chatId, "Admin only.");
-        return;
-      }
-      const ref = raw.slice(4).trim();
-      const r = session.loadMission(ref);
-      if (!r.ok) {
-        await reply(env, chatId, r.error);
-        return;
-      }
-      await persistSession(kv, session);
-      await reply(env, chatId, `Active mission → ${r.doc.missionName || r.entry.id}`);
-      return;
-    }
-    const body = session.formatTimeline(raw);
-    await reply(env, chatId, body.length > 3500 ? body.slice(0, 3500) + "\n…" : body);
-    return;
-  }
-
-  if (text.startsWith("/eta")) {
-    const st = session.status();
-    await reply(env, chatId, st.etaText);
-    return;
-  }
-
-  if (text.startsWith("/status")) {
-    const st = session.status();
-    const lines = [
-      st.missionName || "TPlus",
-      st.tPlusLabel,
-      `phase: ${st.phase}`,
-      `last: ${st.lastActionId || "—"}`,
-    ];
-    if (st.statusEtaLine) lines.push(st.statusEtaLine);
-    await reply(env, chatId, lines.join("\n"));
-    return;
-  }
-
-  if (text.startsWith("/ops")) {
-    if (!admin) {
-      await reply(env, chatId, "Admin only.");
-      return;
-    }
-    const st = session.status();
-    const n = opsActionsForScript(session.scriptDoc?.script || []).length;
     await reply(
       env,
       chatId,
-      `Ops — ${st.missionName || "mission"} (${n} buttons · script + hold/go/anomaly)`,
-      { reply_markup: opsKeyboard(session) },
+      `Unsubscribed. (${n} remaining)\n/start anytime to rejoin.`,
+    );
+    return;
+  }
+
+  // Retired HITL / mission-browse surface
+  if (
+    text.startsWith("/ops") ||
+    text.startsWith("/hype") ||
+    text.startsWith("/mission") ||
+    text.startsWith("/eta")
+  ) {
+    await reply(
+      env,
+      chatId,
+      "Retired. Launch alerts come from the webcast live worker.\n" +
+        (admin
+          ? "Ops: /note · /broadcast · /inbox — or run webcast:live --mode test|ops"
+          : "Use /status · /help · /stop"),
     );
     return;
   }
@@ -686,29 +656,6 @@ async function handleMessage(env, kv, message) {
       stripCmd(text, "broadcast"),
       photoFileId,
     );
-    return;
-  }
-
-  if (text.startsWith("/hype")) {
-    if (!admin) {
-      await reply(env, chatId, "Admin only.");
-      return;
-    }
-    const raw = stripCmd(text, "hype");
-    const hours = raw ? Number(raw) : 48;
-    if (!Number.isFinite(hours) || hours <= 0) {
-      await reply(env, chatId, "Usage: /hype <hours>");
-      return;
-    }
-    const r = await session.fireHype(hours);
-    if (!r.ok) {
-      await reply(env, chatId, r.error || "hype failed");
-      return;
-    }
-    await persistSession(kv, session);
-    const alertText = r.alerts[0]?.text || r.label;
-    const n = await fanOut(env, kv, alertText);
-    await reply(env, chatId, `Hype sent to ${n} subscriber(s).`);
     return;
   }
 
@@ -809,54 +756,24 @@ async function handleCallback(env, kv, cq) {
     return;
   }
 
-  if (!data.startsWith("ss:")) {
-    await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
-    return;
-  }
-  const id = data.slice(3);
-  const session = await getSession(env, kv);
-
-  if (id === "__status") {
-    const st = session.status();
-    // Toast only — a reply message would scroll the long /ops pad away
+  // Legacy /ops pad callbacks — retired
+  if (data.startsWith("ss:")) {
     await tg(env, "answerCallbackQuery", {
       callback_query_id: cq.id,
-      text: `${st.tPlusLabel} · ${st.phase}`.slice(0, 200),
-    });
-    return;
-  }
-
-  const result = await session.fire(id);
-  await persistSession(kv, session);
-  if (!result.ok) {
-    await tg(env, "answerCallbackQuery", {
-      callback_query_id: cq.id,
-      text: (result.error || "error").slice(0, 200),
+      text: "/ops retired — use webcast:live",
       show_alert: true,
     });
+    if (cq.message?.message_id != null && chatId != null) {
+      await tg(env, "editMessageReplyMarkup", {
+        chat_id: chatId,
+        message_id: cq.message.message_id,
+        reply_markup: { inline_keyboard: [] },
+      });
+    }
     return;
   }
 
-  const alertText = result.alerts[0]?.text || `Marked ${id}`;
-  let deltaBit = "";
-  if (
-    result.tPlusSec != null &&
-    result.action?.scriptTPlusSec != null &&
-    id !== "liftoff"
-  ) {
-    const delta = result.tPlusSec - result.action.scriptTPlusSec;
-    deltaBit = ` · Δ${delta >= 0 ? "+" : ""}${Math.round(delta)}s`;
-  }
-
-  // Don't echo to the firing admin's chat (keeps /ops keyboard in view).
-  // Subscribers still get the alert; admin gets a toast ack.
-  const n = await fanOut(env, kv, alertText, {
-    excludeChatIds: [chatId, userId],
-  });
-  await tg(env, "answerCallbackQuery", {
-    callback_query_id: cq.id,
-    text: `${alertText}${deltaBit} → ${n}`.slice(0, 200),
-  });
+  await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
 }
 
 export default {

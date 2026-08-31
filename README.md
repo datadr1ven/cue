@@ -165,15 +165,10 @@ TELEGRAM_TOKEN=… TELEGRAM_ALLOWLIST=your_id DELIVERY_MODE=telegram npm run sta
 
 | Command | Role |
 |---------|------|
-| `/missions` · `/mission <n\|id>` | Archive browse |
-| `/mission use <n\|id>` | Active mission (ops + ETA) |
-| `/eta` · `/status` | NET countdown · live T+ |
-| `/ops` | Mission-scoped milestones + hold/go/anomaly |
-| `/note <text>` | Freeform alert (all subscribers) |
-| `/broadcast <text>` | Announcement |
-| photo + caption `/note …` or `/broadcast …` | Same as above, with image (admin) |
-| `/hype <hours>` | HITL lead-up template (e.g. 48) |
-| `/inbox` · `/reply …` | Admin: free-text inbox + DM reply (admins get batched pings ~10m) |
+| `/start` · `/stop` · `/status` · `/help` | Subscribe / unsubscribe / enrollment |
+| `/note` · `/broadcast` | Admin fan-out (optional photo caption) |
+| `/inbox` · `/reply …` | Admin free-text inbox + DM reply (batched pings ~10m) |
+| `POST /suggest` | Laptop `webcast:live` emit (`mode=test\|ops`) |
 
 The Telegram **/** menu lists user commands only (`start`, `help`, `missions`, `mission`, `eta`, `status`). Ops commands stay off the public menu.
 
