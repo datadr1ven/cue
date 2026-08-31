@@ -17,7 +17,6 @@
  */
 
 import { createStarshipSession } from "../../src/starship-session.js";
-import { formatTPlus } from "../../src/engine/domains/starship/index.js";
 import {
   bundledLoadMission,
   bundledListMissions,
