@@ -7,9 +7,11 @@ import index from "../../missions/index.json" with { type: "json" };
 import flight12 from "../../missions/flights/starship-flight-12-script.json" with { type: "json" };
 import flight13 from "../../missions/flights/starship-flight-13-script.json" with { type: "json" };
 import starlink1750 from "../../missions/flights/starlink-sl-17-50-script.json" with { type: "json" };
+import starlink1523 from "../../missions/flights/starlink-sl-15-23-script.json" with { type: "json" };
 import romanFh from "../../missions/flights/roman-fh-script.json" with { type: "json" };
 
 const DOCS = {
+  [starlink1523.missionId]: starlink1523,
   [romanFh.missionId]: romanFh,
   [flight12.missionId]: flight12,
   [flight13.missionId]: flight13,

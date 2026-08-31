@@ -1,6 +1,12 @@
 {
-  "defaultMissionId": "roman-fh",
+  "defaultMissionId": "starlink-sl-15-23",
   "missions": [
+    {
+      "id": "starlink-sl-15-23",
+      "number": 1523,
+      "label": "Starlink 15-23",
+      "file": "flights/starlink-sl-15-23-script.json"
+    },
     {
       "id": "roman-fh",
       "label": "Roman Space Telescope (FH)",
