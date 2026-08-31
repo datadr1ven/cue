@@ -576,7 +576,36 @@ async function main() {
       }
     }
 
-    await sleep(args.ocrEverySec * 1000);
+    // Sleep until the next script milestone (locked clock) or the OCR poll —
+    // whichever is sooner — so grab+emit land on the anticipated T+, not
+    // only on the 5s sampling grid. Holds: keep polling OCR on cadence.
+    let sleepSec = args.ocrEverySec;
+    const beliefForSleep = clock.now(Date.now());
+    if (
+      beliefForSleep &&
+      Number.isFinite(beliefForSleep.tPlusSec) &&
+      (beliefForSleep.stallMs || 0) < 8000
+    ) {
+      let nextDue = null;
+      for (const row of script) {
+        if (row?.actionId == null || row.tPlusSec == null) continue;
+        if (emitted.has(row.actionId)) continue;
+        const dueAt = Number(row.tPlusSec) - args.leadSec;
+        const until = dueAt - beliefForSleep.tPlusSec;
+        if (until > 0.05) {
+          nextDue = { row, until };
+          break;
+        }
+      }
+      if (nextDue && nextDue.until < sleepSec) {
+        sleepSec = Math.max(0.05, nextDue.until);
+        logInfo(
+          `next ${nextDue.row.actionId} in ${nextDue.until.toFixed(1)}s ` +
+            `(script ${formatMissionClock(nextDue.row.tPlusSec)}) — wake for grab+emit`,
+        );
+      }
+    }
+    await sleep(sleepSec * 1000);
   }
 }
 
