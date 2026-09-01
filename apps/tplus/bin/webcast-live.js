@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { tmpdir } from "os";
+// Side effect: load monorepo-root .env into process.env
+import "cue/config.js";
 import { logError, logInfo, logWarn } from "cue/log.js";
 import {
   matchPhrases,

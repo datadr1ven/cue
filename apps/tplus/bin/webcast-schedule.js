@@ -23,6 +23,8 @@ import { spawn } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { fileURLToPath } from "url";
+// Side effect: load monorepo-root .env into process.env
+import "cue/config.js";
 import { logError, logInfo, logWarn } from "cue/log.js";
 
 const APP_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
