@@ -259,7 +259,10 @@ function createClockBelief() {
       lastOcr = { clockSec, wallMs };
       return belief;
     },
-    /** Coast only briefly if OCR is fresh and not stalled */
+    /**
+     * Coast from last OCR grab-time. Window must cover OCR + ASR + precision
+     * sleep (was 12s — ASR alone often exceeded that and froze coast → missed wakes).
+     */
     now(wallMs = Date.now()) {
       if (!belief) return null;
       const age = wallMs - belief.asOfWallMs;
@@ -267,7 +270,8 @@ function createClockBelief() {
         // hold: freeze at last OCR
         return { ...belief, source: "hold", ageMs: age };
       }
-      if (age < 12000 && belief.source === "ocr") {
+      // ~1 minute: enough for whisper + sleep-to-milestone between OCR samples
+      if (age < 60_000 && (belief.source === "ocr" || belief.source === "coast")) {
         const coast = belief.tPlusSec + age / 1000;
         return {
           ...belief,
@@ -376,6 +380,18 @@ async function main() {
     return syncFileT + (wallMs - syncWallMs) / 1000;
   }
 
+  /** File seek for a mission T+ using OCR↔wall liftoff mapping (frame-accurate catch-up). */
+  function fileSsForMissionTPlus(tPlusSec) {
+    if (!fileMode) return null;
+    const raw = clock.raw();
+    if (raw?.liftoffWallMs != null && Number.isFinite(raw.liftoffWallMs)) {
+      return (
+        syncFileT + (raw.liftoffWallMs + Number(tPlusSec) * 1000 - syncWallMs) / 1000
+      );
+    }
+    return fileSsAt();
+  }
+
   /**
    * Next unemitted script row and seconds until due (coasted clock).
    * @returns {{ row: object, dueAt: number, until: number }|null}
@@ -395,19 +411,19 @@ async function main() {
 
   /**
    * Grab+emit any milestone that is due now (within earlyε) or overdue.
-   * Always runs BEFORE OCR so stills are not lagged by RapidOCR.
    * @param {string} reason
    * @param {object} [ocrSnap]
+   * @param {{ atWall?: number }} [opts] — evaluate belief at this wall (use grabWall
+   *   after OCR so we do not coast by RapidOCR duration into a false “late” clock)
    */
-  async function emitDueMilestones(reason, ocrSnap = {}) {
-    const nowWall = Date.now();
-    const belief = clock.now(nowWall);
+  async function emitDueMilestones(reason, ocrSnap = {}, opts = {}) {
+    const atWall = opts.atWall ?? Date.now();
+    const belief = clock.now(atWall);
     if (!belief || !Number.isFinite(belief.tPlusSec)) return;
     if ((belief.stallMs || 0) >= 8000 && reason !== "catch-up") {
       // During hold, only catch-up path after a fresh OCR should fire.
       return;
     }
-    const ssNow = fileSsAt(nowWall);
     for (const row of script) {
       if (row?.actionId == null || row.tPlusSec == null) continue;
       if (emitted.has(row.actionId)) continue;
@@ -415,9 +431,18 @@ async function main() {
       // earlyε 0.35s: fire slightly before due so grab lands on script T+
       if (belief.tPlusSec + 0.35 < dueAt) continue;
       if (belief.tPlusSec > Number(row.tPlusSec) + 120) continue;
+      const overdue = belief.tPlusSec - dueAt;
+      // Precision wake: grab at wall "now". Catch-up / overdue: seek the script
+      // T+ frame (OCR may have finished seconds after grabWall).
+      const ssNow = !fileMode
+        ? null
+        : reason === "catch-up" || overdue > 0.5
+          ? fileSsForMissionTPlus(dueAt)
+          : fileSsAt(Date.now());
       logInfo(
         `${reason} ${row.actionId} @ clock ${formatMissionClock(belief.tPlusSec)} ` +
-          `(script ${formatMissionClock(row.tPlusSec)})`,
+          `(script ${formatMissionClock(row.tPlusSec)})` +
+          (overdue > 0.5 ? ` overdue=${overdue.toFixed(1)}s` : ""),
       );
       await emitRow(row, belief, ssNow, ocrSnap);
     }
@@ -572,11 +597,39 @@ async function main() {
         logInfo("clock — (no HUD / OCR miss)");
       }
 
-      // 4) Catch-up (hold recovery / OCR crossed a due time during step 3)
-      await emitDueMilestones("catch-up", ocr);
+      // 4) Catch-up at grabWall — do NOT coast by OCR duration (that was
+      //    reporting T+0:07 for a T+0:00 frame and seeking wall-late).
+      await emitDueMilestones("catch-up", ocr, { atWall: grabWall });
 
-      // 5) ASR cadence (evidence only — not shown to users yet)
-      if (args.asr && wall - lastAsrAt > args.asrEverySec * 1000) {
+      // 5) Sleep plan BEFORE ASR — whisper was eating the precision window.
+      let sleepSec = args.ocrEverySec;
+      let nextForSleep = null;
+      const beliefForSleep = clock.now(Date.now());
+      if (
+        beliefForSleep &&
+        Number.isFinite(beliefForSleep.tPlusSec) &&
+        (beliefForSleep.stallMs || 0) < 8000
+      ) {
+        nextForSleep = nextMilestone(beliefForSleep);
+        if (nextForSleep && nextForSleep.until > 0) {
+          sleepSec = Math.min(sleepSec, Math.max(0.05, nextForSleep.until));
+          if (nextForSleep.until <= args.ocrEverySec) {
+            logInfo(
+              `next ${nextForSleep.row.actionId} in ${nextForSleep.until.toFixed(2)}s ` +
+                `(script ${formatMissionClock(nextForSleep.row.tPlusSec)}) — precision wake`,
+            );
+          }
+        }
+      }
+
+      // 6) ASR only when the next milestone is not imminent (evidence-only).
+      const asrBudgetOk =
+        !nextForSleep || nextForSleep.until > Math.max(12, args.asrEverySec + 2);
+      if (
+        args.asr &&
+        asrBudgetOk &&
+        wall - lastAsrAt > args.asrEverySec * 1000
+      ) {
         lastAsrAt = wall;
         try {
           const asrSs = fileMode
@@ -630,7 +683,17 @@ async function main() {
         } catch (e) {
           logWarn(`asr: ${e.message || e}`);
         }
+        // Recompute sleep after ASR so we don't undershoot the milestone.
+        const b2 = clock.now(Date.now());
+        if (b2 && (b2.stallMs || 0) < 8000) {
+          const n2 = nextMilestone(b2);
+          if (n2 && n2.until > 0) {
+            sleepSec = Math.min(args.ocrEverySec, Math.max(0.05, n2.until));
+          }
+        }
       }
+
+      await sleep(sleepSec * 1000);
     } catch (e) {
       logWarn(`loop: ${e.message || e}`);
       if (!fileMode && args.url) {
@@ -640,31 +703,8 @@ async function main() {
           /* keep old */
         }
       }
+      await sleep(args.ocrEverySec * 1000);
     }
-
-    // 6) Sleep until next milestone or OCR poll. Holds → OCR cadence only.
-    let sleepSec = args.ocrEverySec;
-    const beliefForSleep = clock.now(Date.now());
-    if (
-      beliefForSleep &&
-      Number.isFinite(beliefForSleep.tPlusSec) &&
-      (beliefForSleep.stallMs || 0) < 8000
-    ) {
-      const next = nextMilestone(beliefForSleep);
-      if (next && next.until > 0) {
-        // Always sleep the lesser of OCR cadence and time-to-milestone.
-        // When until > ocrEverySec we wake for OCR first; step 2 then sleeps
-        // the remainder and emits before the next OCR.
-        sleepSec = Math.min(sleepSec, Math.max(0.05, next.until));
-        if (next.until <= args.ocrEverySec) {
-          logInfo(
-            `next ${next.row.actionId} in ${next.until.toFixed(2)}s ` +
-              `(script ${formatMissionClock(next.row.tPlusSec)}) — precision wake`,
-          );
-        }
-      }
-    }
-    await sleep(sleepSec * 1000);
   }
 }
 
