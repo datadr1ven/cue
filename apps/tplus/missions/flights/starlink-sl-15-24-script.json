@@ -1,0 +1,39 @@
+{
+  "missionId": "starlink-sl-15-24",
+  "missionName": "Starlink 15-24",
+  "vehicle": "Falcon 9",
+  "site": "SLC-4E, Vandenberg SFB",
+  "landing": "Of Course I Still Love You (Pacific droneship)",
+  "payload": "27 Starlink satellites → LEO",
+  "source": "https://www.spacex.com/launches/sl-15-24",
+  "notes": "Window Sep 6 2026 06:59–10:59 ET (10:59–14:59 UTC). Webcast ~T−10m on SpaceX.com / X @SpaceX. Booster flight 19; ASDS OCISLY. launchApproxUtc is window OPEN / targeted T-0 — press liftoff on video truth. All T+ times approximate from SpaceX page.",
+  "launchApproxUtc": "2026-09-06T10:59:00Z",
+  "windowOpenUtc": "2026-09-06T10:59:00Z",
+  "windowCloseUtc": "2026-09-06T14:59:00Z",
+  "countdown": [
+    { "tMinusSec": 2280, "label": "SpaceX Launch Director verifies go for propellant load" },
+    { "tMinusSec": 2100, "label": "1st stage RP-1 loading" },
+    { "tMinusSec": 2100, "label": "1st stage LOX loading" },
+    { "tMinusSec": 960, "label": "2nd stage LOX loading" },
+    { "tMinusSec": 420, "label": "Falcon 9 begins engine chill prior to launch" },
+    { "tMinusSec": 60, "label": "Final prelaunch checks / tank pressurization" },
+    { "tMinusSec": 45, "label": "SpaceX Launch Director verifies go for launch" },
+    { "tMinusSec": 3, "label": "Engine ignition sequence starts" }
+  ],
+  "script": [
+    { "tPlusSec": 0, "actionId": "liftoff", "label": "Falcon 9 liftoff" },
+    { "tPlusSec": 68, "actionId": "max_q", "label": "Max Q" },
+    { "tPlusSec": 145, "actionId": "meco", "label": "1st stage MECO" },
+    { "tPlusSec": 149, "actionId": "stage_sep", "label": "1st and 2nd stages separate" },
+    { "tPlusSec": 156, "actionId": "ses1", "label": "2nd stage engine starts (SES-1)" },
+    { "tPlusSec": 177, "actionId": "fairing", "label": "Fairing separation" },
+    { "tPlusSec": 361, "actionId": "entry_burn", "label": "1st stage entry burn begins" },
+    { "tPlusSec": 385, "actionId": "entry_burn_end", "label": "1st stage entry burn ends" },
+    { "tPlusSec": 479, "actionId": "landing_burn_booster", "label": "1st stage landing burn begins" },
+    { "tPlusSec": 501, "actionId": "booster_landing", "label": "1st stage landing (OCISLY)" },
+    { "tPlusSec": 518, "actionId": "seco", "label": "2nd stage engine cutoff (SECO-1)" },
+    { "tPlusSec": 3189, "actionId": "ses2", "label": "2nd stage engine starts (SES-2)" },
+    { "tPlusSec": 3190, "actionId": "seco2", "label": "2nd stage engine cutoff (SECO-2)" },
+    { "tPlusSec": 3721, "actionId": "deploy_start", "label": "Starlink satellites deploy" }
+  ]
+}

@@ -53,21 +53,24 @@ for (const entry of bundled) {
   );
 }
 assert(
-  bundledIndex.defaultMissionId === "starlink-sl-15-23",
-  "defaultMissionId should be starlink-sl-15-23",
+  bundledIndex.defaultMissionId === "starlink-sl-15-24",
+  "defaultMissionId should be starlink-sl-15-24",
 );
 const bareDefault = bundledLoadMission("default");
 assert(
-  bareDefault?.doc?.missionId === "starlink-sl-15-23",
-  "bundle default → starlink-sl-15-23",
+  bareDefault?.doc?.missionId === "starlink-sl-15-24",
+  "bundle default → starlink-sl-15-24",
 );
 assert(
   bareDefault.doc.script?.some((r) => r.actionId === "liftoff"),
   "default script has liftoff",
 );
 const m1523 = bundledLoadMission("starlink-sl-15-23");
+const m1524 = bundledLoadMission("starlink-sl-15-24");
+assert(m1524?.doc?.missionId === "starlink-sl-15-24", "bundle load starlink-sl-15-24");
+assert(bundledLoadMission("ussf-153")?.doc?.missionId === "ussf-153", "bundle load ussf-153");
 assert(m1523?.doc?.script?.at(-1)?.actionId === "deploy_start", "sl-15-23 deploy");
-console.log("✓ CF bundle loads every indexed mission (incl. starlink-sl-15-23)");
+console.log("✓ CF bundle loads every indexed mission (incl. starlink-sl-15-24)");
 
 const session = createStarshipSession({
   missionRef: 13,

@@ -24,3 +24,8 @@ seemingly-good-data/
 # Keep curated smoke fixtures
 !packages/cue/examples/**/*.ndjson
 !examples/**/*.ndjson
+
+# Local marketing renders (keep scripts/captions if desired)
+marketing/*.mp4
+marketing/*-frame*.jpg
+tplus_hype_video.mp4

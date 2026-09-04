@@ -1,6 +1,17 @@
 {
-  "defaultMissionId": "starlink-sl-15-23",
+  "defaultMissionId": "starlink-sl-15-24",
   "missions": [
+    {
+      "id": "starlink-sl-15-24",
+      "number": 1524,
+      "label": "Starlink 15-24",
+      "file": "flights/starlink-sl-15-24-script.json"
+    },
+    {
+      "id": "ussf-153",
+      "label": "USSF-153",
+      "file": "flights/ussf-153-script.json"
+    },
     {
       "id": "starlink-sl-15-23",
       "number": 1523,

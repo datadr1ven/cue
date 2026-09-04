@@ -1,0 +1,35 @@
+{
+  "missionId": "ussf-153",
+  "missionName": "USSF-153",
+  "vehicle": "Falcon 9",
+  "site": "SLC-4E, Vandenberg SFB",
+  "landing": "Of Course I Still Love You (Pacific droneship)",
+  "payload": "USSF-153 (classified) → LEO",
+  "source": "https://www.spacex.com/launches/ussf153",
+  "notes": "Target Thu Sep 10 2026; 3h window opens 08:37 PT (15:37 UTC). Backup Fri Sep 11 08:23 PT. Webcast ~T−10m. Booster flight 27; ASDS OCISLY. Classified payload — SpaceX page publishes ascent/landing only (no SES-2/deploy times). launchApproxUtc is window OPEN.",
+  "launchApproxUtc": "2026-09-10T15:37:00Z",
+  "windowOpenUtc": "2026-09-10T15:37:00Z",
+  "windowCloseUtc": "2026-09-10T18:37:00Z",
+  "countdown": [
+    { "tMinusSec": 2280, "label": "SpaceX Launch Director verifies go for propellant load" },
+    { "tMinusSec": 2100, "label": "1st stage RP-1 loading" },
+    { "tMinusSec": 2100, "label": "1st stage LOX loading" },
+    { "tMinusSec": 960, "label": "2nd stage LOX loading" },
+    { "tMinusSec": 420, "label": "Falcon 9 begins engine chill prior to launch" },
+    { "tMinusSec": 60, "label": "Final prelaunch checks / tank pressurization" },
+    { "tMinusSec": 45, "label": "SpaceX Launch Director verifies go for launch" },
+    { "tMinusSec": 3, "label": "Engine ignition sequence starts" }
+  ],
+  "script": [
+    { "tPlusSec": 0, "actionId": "liftoff", "label": "Falcon 9 liftoff" },
+    { "tPlusSec": 67, "actionId": "max_q", "label": "Max Q" },
+    { "tPlusSec": 146, "actionId": "meco", "label": "1st stage MECO" },
+    { "tPlusSec": 149, "actionId": "stage_sep", "label": "1st and 2nd stages separate" },
+    { "tPlusSec": 155, "actionId": "ses1", "label": "2nd stage engine starts (SES-1)" },
+    { "tPlusSec": 175, "actionId": "fairing", "label": "Fairing separation" },
+    { "tPlusSec": 366, "actionId": "entry_burn", "label": "1st stage entry burn begins" },
+    { "tPlusSec": 390, "actionId": "entry_burn_end", "label": "1st stage entry burn ends" },
+    { "tPlusSec": 484, "actionId": "landing_burn_booster", "label": "1st stage landing burn begins" },
+    { "tPlusSec": 506, "actionId": "booster_landing", "label": "1st stage landing (OCISLY)" }
+  ]
+}

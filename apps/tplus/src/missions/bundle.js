@@ -8,9 +8,13 @@ import flight12 from "../../missions/flights/starship-flight-12-script.json" wit
 import flight13 from "../../missions/flights/starship-flight-13-script.json" with { type: "json" };
 import starlink1750 from "../../missions/flights/starlink-sl-17-50-script.json" with { type: "json" };
 import starlink1523 from "../../missions/flights/starlink-sl-15-23-script.json" with { type: "json" };
+import starlink1524 from "../../missions/flights/starlink-sl-15-24-script.json" with { type: "json" };
+import ussf153 from "../../missions/flights/ussf-153-script.json" with { type: "json" };
 import romanFh from "../../missions/flights/roman-fh-script.json" with { type: "json" };
 
 const DOCS = {
+  [starlink1524.missionId]: starlink1524,
+  [ussf153.missionId]: ussf153,
   [starlink1523.missionId]: starlink1523,
   [romanFh.missionId]: romanFh,
   [flight12.missionId]: flight12,
