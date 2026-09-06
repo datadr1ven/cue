@@ -17,6 +17,7 @@
     "./engine/types.js": "./src/engine/types.js",
     "./engine/ingest/ndjson.js": "./src/engine/ingest/ndjson.js",
     "./engine/ingest/openf1.js": "./src/engine/ingest/openf1.js",
+    "./engine/ingest/signalr.js": "./src/engine/ingest/signalr.js",
     "./engine/domains/f1/index.js": "./src/engine/domains/f1/index.js",
     "./engine/domains/starship/index.js": "./src/engine/domains/starship/index.js",
     "./engine/domains/starship/actions.js": "./src/engine/domains/starship/actions.js",

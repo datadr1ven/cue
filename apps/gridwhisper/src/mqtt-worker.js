@@ -35,6 +35,12 @@ let signalsHooked = false;
 let pitFlushTimer = null;
 /** One-time worker init (pipeline / bot / signals) — preserved across MQTT reconnects */
 let workerInitialized = false;
+/** Wall-clock of last MQTT application message (idle watchdog) */
+let lastMessageAt = 0;
+let idleWatchTimer = null;
+
+/** No app messages for this long while "connected" → force reconnect (Monza chequered miss). */
+const MQTT_IDLE_MS = Number(process.env.MQTT_IDLE_MS || 90_000);
 
 const maxReconnectAttemptsBeforeSlow = 10;
 const baseReconnectDelay = 1000;
@@ -174,6 +180,7 @@ function hookLifecycleSignals() {
 }
 
 async function onMessage(topic, buf) {
+  lastMessageAt = Date.now();
   let payload;
   try {
     payload = JSON.parse(buf.toString());
@@ -201,6 +208,35 @@ async function onMessage(topic, buf) {
       await emitAlert(alert);
     }
   }
+}
+
+function clearIdleWatch() {
+  if (idleWatchTimer) {
+    clearInterval(idleWatchTimer);
+    idleWatchTimer = null;
+  }
+}
+
+function ensureIdleWatch() {
+  if (idleWatchTimer || shuttingDown) return;
+  // Poll often enough to notice a stall within ~1 idle window
+  const period = Math.min(15_000, Math.max(5_000, Math.floor(MQTT_IDLE_MS / 3)));
+  idleWatchTimer = setInterval(() => {
+    if (shuttingDown || intentionalDisconnect || !isConnected) return;
+    if (!lastMessageAt) return;
+    const idle = Date.now() - lastMessageAt;
+    if (idle < MQTT_IDLE_MS) return;
+    logWarn(
+      `MQTT idle ${Math.round(idle / 1000)}s (limit ${Math.round(MQTT_IDLE_MS / 1000)}s) — forcing reconnect`,
+    );
+    // Treat as soft close: reconnect path keeps pipeline state
+    isConnected = false;
+    connectMqttClient().catch((e) => {
+      logError("Idle reconnect failed:", e.message || e);
+      scheduleReconnect();
+    });
+  }, period);
+  if (typeof idleWatchTimer.unref === "function") idleWatchTimer.unref();
 }
 
 async function emitAlert(alert) {
@@ -266,6 +302,8 @@ async function connectMqttClient() {
     logInfo("✅ MQTT connected");
     isConnected = true;
     reconnectAttempts = 0;
+    lastMessageAt = Date.now(); // don't trip idle before first message
+    ensureIdleWatch();
     client.subscribe(MQTT_TOPICS, { qos: 1 }, (err) => {
       if (err) logError("Subscribe error:", err);
       else logInfo("✅ Subscribed:", MQTT_TOPICS.join(", "));
@@ -354,6 +392,7 @@ export async function stopMqttWorker(reason = "shutdown") {
   shuttingDown = true;
   intentionalDisconnect = true;
   clearReconnectTimer();
+  clearIdleWatch();
   if (pitFlushTimer) {
     clearInterval(pitFlushTimer);
     pitFlushTimer = null;

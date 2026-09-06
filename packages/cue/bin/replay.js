@@ -3,6 +3,7 @@
  * Offline NDJSON → engine → stdout
  *
  *   npm run replay -- path/to/session.ndjson
+ *   npm run replay -- path/to/signalr.ndjson --signalr
  *   npm run replay -- path/to/session.ndjson --min-severity 7
  *   npm run replay -- path/to/session.ndjson --json
  */
@@ -12,10 +13,12 @@ import { createPipeline } from "../src/engine/pipeline.js";
 import { readNdjsonEvents } from "../src/engine/ingest/ndjson.js";
 
 function parseArgs(argv) {
-  const args = { file: null, minSeverity: 6, json: false };
+  const args = { file: null, minSeverity: 6, json: false, mode: "auto" };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") args.json = true;
+    else if (a === "--signalr") args.mode = "signalr";
+    else if (a === "--openf1") args.mode = "openf1";
     else if (a === "--min-severity") args.minSeverity = Number(argv[++i]);
     else if (a.startsWith("--min-severity="))
       args.minSeverity = Number(a.split("=")[1]);
@@ -28,7 +31,7 @@ async function main() {
   const args = parseArgs(process.argv);
   if (!args.file) {
     console.error(
-      "Usage: npm run replay -- <capture.ndjson> [--min-severity N] [--json]",
+      "Usage: npm run replay -- <capture.ndjson> [--signalr|--openf1] [--min-severity N] [--json]",
     );
     process.exit(2);
   }
@@ -68,7 +71,7 @@ async function main() {
     }
   }
 
-  for await (const ev of readNdjsonEvents(file)) {
+  for await (const ev of readNdjsonEvents(file, { mode: args.mode })) {
     events += 1;
     const { alerts: batch } = pipeline.push(ev);
     for (const alert of batch) printAlert(alert);
