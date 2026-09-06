@@ -55,6 +55,8 @@ function parseArgs(argv) {
     play: false,
     dryRun: false,
     mode: process.env.TPLUS_MODE || "test", // test | ops
+    modeFromEnv: Boolean(process.env.TPLUS_MODE),
+    modeFromCli: false,
     suggestUrl: process.env.TPLUS_SUGGEST_URL || null,
     suggestSecret: process.env.TPLUS_SUGGEST_SECRET || null,
     telegramToken: process.env.TELEGRAM_TOKEN || null,
@@ -76,10 +78,16 @@ function parseArgs(argv) {
     else if (a === "--no-artifacts") out.artifacts = false;
     else if (a === "--play") out.play = true;
     else if (a === "--dry-run") out.dryRun = true;
-    else if (a === "--mode") out.mode = next();
-    else if (a === "--test") out.mode = "test";
-    else if (a === "--ops") out.mode = "ops";
-    else if (a === "--suggest-url") out.suggestUrl = next();
+    else if (a === "--mode") {
+      out.mode = next();
+      out.modeFromCli = true;
+    } else if (a === "--test") {
+      out.mode = "test";
+      out.modeFromCli = true;
+    } else if (a === "--ops") {
+      out.mode = "ops";
+      out.modeFromCli = true;
+    } else if (a === "--suggest-url") out.suggestUrl = next();
     else if (a === "--suggest-secret") out.suggestSecret = next();
     else if (a === "--sync-file-t") out.syncFileT = Number(next());
     else if (a === "--lead-sec") out.leadSec = Number(next());
@@ -349,6 +357,16 @@ async function main() {
   logInfo(
     `webcast:live mission=${scriptDoc.missionId} mode=${args.mode} dryRun=${args.dryRun} asr=${args.asr} artifacts=${args.artifacts}`,
   );
+  if (args.mode === "test") {
+    const via = args.modeFromCli
+      ? "CLI --mode/--test"
+      : args.modeFromEnv
+        ? "TPLUS_MODE in .env"
+        : "default";
+    logWarn(
+      `Fan-out is TEST (admins only) — source=${via}. Pass --ops for all subscribers.`,
+    );
+  }
 
   // Park until media available
   if (!media) {

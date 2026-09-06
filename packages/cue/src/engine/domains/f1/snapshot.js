@@ -950,6 +950,15 @@ function applyLap(state, p, t) {
   // Real F1 flying laps are ~60–110s; reject in-laps / red-flag weirdness
   if (timeSec < 45 || timeSec > 150) return;
 
+  // Lap finished — cancel any incomplete-lap retirement pending for this car
+  // (Monza 2026: BOR completed lap 2 then SC armed a stale pending → false OUT).
+  if (
+    state.pendingRetirement &&
+    Number(state.pendingRetirement.driver) === driver
+  ) {
+    state.pendingRetirement = null;
+  }
+
   state.completeLapCount = (state.completeLapCount || 0) + 1;
   maybePromoteRaceByDuration(state, t);
 
