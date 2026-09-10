@@ -1,0 +1,43 @@
+{
+  "missionId": "o3b-mpower-f",
+  "missionName": "O3b mPOWER Mission",
+  "vehicle": "Falcon 9",
+  "site": "SLC-40, Cape Canaveral SFS",
+  "landing": "A Shortfall of Gravitas (Atlantic droneship)",
+  "payload": "O3b mPOWER 11, 12 & 13 (SES / Boeing) → MEO",
+  "source": "https://www.spacex.com/launches/mpower-f",
+  "webcastUrl": "https://x.com/i/broadcasts/1RKjpbVdykQJw",
+  "notes": "Window Sun Sep 13 2026 14:49–16:16 ET (18:49–20:16 UTC). Backup Mon Sep 14 same window. Webcast ~T−10m. Booster B1080 flight 29; ASDS ASOG. Final three O3b mPOWER sats. Upper-stage T+ (SES-2/3 + deploys) approximate from prior SpaceX O3b mPOWER page (mpower-d) — confirm on webcast. launchApproxUtc is window OPEN.",
+  "launchApproxUtc": "2026-09-13T18:49:00Z",
+  "windowOpenUtc": "2026-09-13T18:49:00Z",
+  "windowCloseUtc": "2026-09-13T20:16:00Z",
+  "countdown": [
+    { "tMinusSec": 2280, "label": "SpaceX Launch Director verifies go for propellant load" },
+    { "tMinusSec": 2100, "label": "1st stage RP-1 loading" },
+    { "tMinusSec": 2100, "label": "1st stage LOX loading" },
+    { "tMinusSec": 960, "label": "2nd stage LOX loading" },
+    { "tMinusSec": 420, "label": "Falcon 9 begins engine chill prior to launch" },
+    { "tMinusSec": 60, "label": "Final prelaunch checks / tank pressurization" },
+    { "tMinusSec": 45, "label": "SpaceX Launch Director verifies go for launch" },
+    { "tMinusSec": 3, "label": "Engine ignition sequence starts" }
+  ],
+  "script": [
+    { "tPlusSec": 0, "actionId": "liftoff", "label": "Falcon 9 liftoff" },
+    { "tPlusSec": 71, "actionId": "max_q", "label": "Max Q" },
+    { "tPlusSec": 146, "actionId": "meco", "label": "1st stage MECO" },
+    { "tPlusSec": 150, "actionId": "stage_sep", "label": "1st and 2nd stages separate" },
+    { "tPlusSec": 158, "actionId": "ses1", "label": "2nd stage engine starts (SES-1)" },
+    { "tPlusSec": 201, "actionId": "fairing", "label": "Fairing separation" },
+    { "tPlusSec": 374, "actionId": "entry_burn", "label": "1st stage entry burn begins" },
+    { "tPlusSec": 401, "actionId": "entry_burn_end", "label": "1st stage entry burn ends" },
+    { "tPlusSec": 471, "actionId": "seco", "label": "2nd stage engine cutoff (SECO-1)" },
+    { "tPlusSec": 491, "actionId": "landing_burn_booster", "label": "1st stage landing burn begins" },
+    { "tPlusSec": 515, "actionId": "booster_landing", "label": "1st stage landing (ASOG)" },
+    { "tPlusSec": 1615, "actionId": "ses2", "label": "2nd stage engine starts (SES-2)" },
+    { "tPlusSec": 1647, "actionId": "seco2", "label": "2nd stage engine cutoff (SECO-2)" },
+    { "tPlusSec": 6576, "actionId": "relight", "label": "2nd stage SES-3 / SECO-3" },
+    { "tPlusSec": 6794, "actionId": "deploy_start", "label": "First O3b mPOWER satellite deploys" },
+    { "tPlusSec": 7214, "actionId": "note", "label": "Second O3b mPOWER satellite deploys" },
+    { "tPlusSec": 7634, "actionId": "deploy_done", "label": "Third O3b mPOWER satellite deploys" }
+  ]
+}

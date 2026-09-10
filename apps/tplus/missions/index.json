@@ -1,6 +1,22 @@
 {
-  "defaultMissionId": "starlink-sl-15-24",
+  "defaultMissionId": "o3b-mpower-f",
   "missions": [
+    {
+      "id": "o3b-mpower-f",
+      "label": "O3b mPOWER Mission",
+      "file": "flights/o3b-mpower-f-script.json"
+    },
+    {
+      "id": "ussf-259",
+      "label": "USSF-259",
+      "file": "flights/ussf-259-script.json"
+    },
+    {
+      "id": "starlink-sl-15-27",
+      "number": 1527,
+      "label": "Starlink 15-27",
+      "file": "flights/starlink-sl-15-27-script.json"
+    },
     {
       "id": "starlink-sl-15-24",
       "number": 1524,

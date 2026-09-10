@@ -13,7 +13,8 @@ Retired: public `/ops` mission-browse menu and Approve/Dismiss suggest flow.
 ```bash
 npm run validate:missions
 npm run smoke:tplus
-npm run webcast:live -- --mission starlink-sl-15-23 --mode test --url 'https://x.com/i/broadcasts/…'
+npm run webcast:live -- --mission o3b-mpower-f --mode test
+# optional: --url 'https://x.com/i/broadcasts/…' overrides mission webcastUrl
 npm run cf:deploy:tplus
 ```
 

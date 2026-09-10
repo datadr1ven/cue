@@ -53,24 +53,32 @@ for (const entry of bundled) {
   );
 }
 assert(
-  bundledIndex.defaultMissionId === "starlink-sl-15-24",
-  "defaultMissionId should be starlink-sl-15-24",
+  bundledIndex.defaultMissionId === "o3b-mpower-f",
+  "defaultMissionId should be o3b-mpower-f",
 );
 const bareDefault = bundledLoadMission("default");
 assert(
-  bareDefault?.doc?.missionId === "starlink-sl-15-24",
-  "bundle default → starlink-sl-15-24",
+  bareDefault?.doc?.missionId === "o3b-mpower-f",
+  "bundle default → o3b-mpower-f",
 );
 assert(
   bareDefault.doc.script?.some((r) => r.actionId === "liftoff"),
   "default script has liftoff",
 );
+assert(
+  bareDefault.doc.webcastUrl?.includes("broadcasts"),
+  "default mission has webcastUrl",
+);
 const m1523 = bundledLoadMission("starlink-sl-15-23");
 const m1524 = bundledLoadMission("starlink-sl-15-24");
+const m1527 = bundledLoadMission("starlink-sl-15-27");
 assert(m1524?.doc?.missionId === "starlink-sl-15-24", "bundle load starlink-sl-15-24");
+assert(m1527?.doc?.missionId === "starlink-sl-15-27", "bundle load starlink-sl-15-27");
 assert(bundledLoadMission("ussf-153")?.doc?.missionId === "ussf-153", "bundle load ussf-153");
+assert(bundledLoadMission("ussf-259")?.doc?.missionId === "ussf-259", "bundle load ussf-259");
+assert(bundledLoadMission("o3b-mpower-f")?.doc?.webcastUrl, "o3b webcastUrl");
 assert(m1523?.doc?.script?.at(-1)?.actionId === "deploy_start", "sl-15-23 deploy");
-console.log("✓ CF bundle loads every indexed mission (incl. starlink-sl-15-24)");
+console.log("✓ CF bundle loads every indexed mission (incl. upcoming Falcon 9 trio)");
 
 const session = createStarshipSession({
   missionRef: 13,

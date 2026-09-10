@@ -99,15 +99,14 @@ Stop any local `npm run starship:bot` (polling conflicts with webhook).
 
 Same path for every vehicle — data-driven `/ops` from the script:
 
-1. Add `missions/flights/<id>-script.json` (NET + ordered `script[]` milestones).  
-2. Register in `missions/index.json` (optional `number` for `/mission use <n>`).  
+1. Add `missions/flights/<id>-script.json` (NET + ordered `script[]` milestones; optional `webcastUrl` for X broadcast).  
+2. Register in `missions/index.json` (optional `number`; set `defaultMissionId` for the active/upcoming flight — `/mission use` is retired).  
 3. **Import the new JSON in** `src/missions/bundle.js` (Workers cannot read the filesystem).  
 4. Use `actionId`s from the `LAUNCH_ACTIONS` catalog (`packages/cue/src/engine/domains/starship/actions.js`). Add a catalog row only if you need a *new* kind of milestone.  
 5. `npm run validate:missions && npm run smoke:tplus`  
 6. `npm run cf:deploy:tplus`  
-7. `/mission use <n|id>` as admin (or set `defaultMissionId`)  
 
-`/ops` shows: always-on `hold` / `go` / `los` / `anomaly` / `success`, then that mission’s script in order.
+Webcast loads the mission via `--mission <id>` (and `/suggest` body.missionId).
 
 ## Webcast emit → test | ops
 
@@ -124,14 +123,11 @@ npx wrangler secret put TPLUS_SUGGEST_SECRET
 export TPLUS_SUGGEST_URL=https://tplus.scenicminddigital.workers.dev/suggest
 export TPLUS_SUGGEST_SECRET=…
 
-# Rehearsal — admins only
-npm run webcast:live -- \
-  --url 'https://x.com/i/broadcasts/…' \
-  --mission starlink-sl-15-23 \
-  --mode test
+# Rehearsal — admins only (uses mission webcastUrl when --url omitted)
+npm run webcast:live -- --mission o3b-mpower-f --mode test
 
-# Launch night — everyone
-npm run webcast:live -- --url '…' --mission starlink-sl-15-23 --mode ops
+# Override stream, or launch night for everyone
+npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission o3b-mpower-f --mode ops
 ```
 
 ## Migrate existing `data/users.json`

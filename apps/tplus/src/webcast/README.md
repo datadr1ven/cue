@@ -28,16 +28,16 @@ export TELEGRAM_ADMIN_IDS=your_numeric_id
 ## Live / rehearsal
 
 ```bash
-# Safe rehearsal — admins only
-npm run webcast:live -- \
-  --url 'https://x.com/i/broadcasts/1yKAPwXpMlqxb' \
-  --mission starlink-sl-15-23 \
-  --mode test
+# Safe rehearsal — admins only (mission webcastUrl used when --url omitted)
+npm run webcast:live -- --mission o3b-mpower-f --mode test
 
 # Launch night — everyone
+npm run webcast:live -- --mission o3b-mpower-f --mode ops
+
+# Override stream URL if the published broadcast changes
 npm run webcast:live -- \
-  --url 'https://x.com/i/broadcasts/1yKAPwXpMlqxb' \
-  --mission starlink-sl-15-23 \
+  --url 'https://x.com/i/broadcasts/…' \
+  --mission o3b-mpower-f \
   --mode ops
 
 # Local dry-run (no Telegram)

@@ -9,8 +9,11 @@
  *   --mode test  → fan-out to admins only (default, safe for rehearsal)
  *   --mode ops   → fan-out to all subscribers
  *
- *   npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission starlink-sl-15-23 --mode test
+ *   npm run webcast:live -- --mission o3b-mpower-f --mode test
+ *   npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission starlink-sl-15-27 --mode test
  *   npm run webcast:live -- --video /tmp/roman-window.mp4 --mission roman-fh --play --dry-run
+ *
+ * If --url/--video omitted, uses mission script webcastUrl when present.
  */
 
 import { spawn } from "child_process";
@@ -45,7 +48,7 @@ function parseArgs(argv) {
   const out = {
     url: null,
     video: null,
-    mission: "roman-fh",
+    mission: "o3b-mpower-f",
     python: process.env.WEBCAST_PYTHON || DEFAULT_PYTHON,
     pollSec: 45,
     ocrEverySec: 5,
@@ -100,12 +103,14 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
+  webcast:live --mission <id> [--mode test|ops]
   webcast:live --url <x-broadcast> --mission <id> [--mode test|ops]
   webcast:live --video <mp4> --mission <id> [--play] [--dry-run] [--mode test]
 
 Always-on consumer: park until media/clock available, hold-aware OCR lock,
 POST milestones to CF /suggest for immediate fan-out.
 
+  --url / --video optional when the mission script has webcastUrl
   --mode test   admins only (default; safe rehearsal)
   --mode ops    all subscribers
   --test / --ops   aliases
@@ -322,9 +327,9 @@ function sleep(ms) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help || (!args.url && !args.video)) {
+  if (args.help) {
     usage();
-    process.exit(args.help ? 0 : 1);
+    process.exit(0);
   }
   if (!args.dryRun && (!args.suggestUrl || !args.suggestSecret)) {
     throw new Error("Need TPLUS_SUGGEST_URL + TPLUS_SUGGEST_SECRET (or --dry-run)");
@@ -335,6 +340,17 @@ async function main() {
 
   const missionPath = resolveMission(args.mission);
   const scriptDoc = JSON.parse(readFileSync(missionPath, "utf8"));
+  if (!args.url && !args.video && scriptDoc.webcastUrl) {
+    args.url = String(scriptDoc.webcastUrl).trim();
+    logInfo(`Using mission webcastUrl: ${args.url}`);
+  }
+  if (!args.url && !args.video) {
+    usage();
+    logError(
+      `Need --url, --video, or mission webcastUrl (mission=${args.mission})`,
+    );
+    process.exit(1);
+  }
   const script = scriptDoc.script || [];
   const scriptTPlus = scriptTPlusByAction(scriptDoc);
   const phrases = normalizePhraseBook(
