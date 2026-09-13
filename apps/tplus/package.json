@@ -14,6 +14,7 @@
     "webcast:listen": "node bin/webcast-listen.js",
     "smoke:webcast": "node bin/smoke-webcast.js",
     "smoke:ll2": "node bin/smoke-ll2.js",
+    "schedule:tplus": "node bin/schedule-from-ll2.js",
     "validate:missions": "node bin/validate-mission.js",
     "smoke": "node bin/smoke-tplus.js",
     "cf:deploy": "wrangler deploy",

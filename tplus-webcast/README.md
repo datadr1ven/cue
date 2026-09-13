@@ -41,16 +41,21 @@ npm run webcast:live -- --ll2-search 'O3b mPower' --dry-run
 
 ## Schedule (America/Denver)
 
-T−30 → window close +30.
+**Daily refresh** at **06:00 local** (1 LL2 call — fine vs 15/hour free tier):
 
-| Alias | LL2 id | Cron start (MDT) | Cron stop (MDT) |
-|-------|--------|------------------|-----------------|
-| `o3b-mpower-f` | `ad358a4d-…` | Sun Sep 13 **12:19** | Sun **14:46** |
-| `vega-c-sentinel-3c-flex` | `8effc13a-…` | Mon Sep 14 **18:51** | Mon **19:51** |
-| `ussf-259` | `17c71937-…` | Tue Sep 15 **18:30** | Tue **23:30** |
-| `starlink-sl-15-27` | `d1471f9d-…` | Sat Sep 19 **19:17** | Sun **00:17** |
+```bash
+npm run schedule:tplus -w tplus -- --apply-crontab
+# preview only:
+npm run schedule:tplus -w tplus -- --dry-run --apply-crontab
+```
 
-If NET slips outside the published window, update crontab or start manually.
+Writes `tplus-webcast/schedule.json` and replaces the crontab block between  
+`# BEGIN TPLUS-WEBCAST` … `# END TPLUS-WEBCAST` (Spain / other crons untouched).
+
+Rules: next **72h**, Official Webcast required, skip TBD/Success/vague month-level NET.  
+Start = NET−30m, stop = window_end+30m. Scrubs that slip a day get picked up on the next morning run.
+
+Hand aliases still work via `webcast-ctl.sh start <alias>` for known LL2 ids.
 
 Requires `TPLUS_SUGGEST_*` + Telegram secrets in `~/cue/.env`. CLI `--mode ops` overrides `TPLUS_MODE=test`.
 
