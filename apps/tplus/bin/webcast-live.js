@@ -34,6 +34,7 @@ import {
 import {
   uploadTelegramFile,
   deleteTelegramMessage,
+  sendTelegramText,
 } from "../src/webcast/tg-upload.js";
 import { loadScriptDocFromLl2 } from "../src/missions/ll2.js";
 import { createRunArchive } from "../src/webcast/run-archive.js";
@@ -70,6 +71,10 @@ function parseArgs(argv) {
     suggestUrl: process.env.TPLUS_SUGGEST_URL || null,
     suggestSecret: process.env.TPLUS_SUGGEST_SECRET || null,
     telegramToken: process.env.TELEGRAM_TOKEN || null,
+    adminIds: (process.env.TELEGRAM_ADMIN_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
     adminId: process.env.TELEGRAM_ADMIN_IDS?.split(",")[0]?.trim() || null,
     syncFileT: 0,
     leadSec: 0,
@@ -510,6 +515,41 @@ async function main() {
     );
   }
 
+  const adminChatIds = args.adminIds.length
+    ? args.adminIds
+    : args.adminId
+      ? [args.adminId]
+      : [];
+
+  /** Admin-only health pings (never fan-out to subscribers). */
+  async function notifyAdmins(text) {
+    if (args.dryRun || !args.telegramToken || !adminChatIds.length) return;
+    for (const chatId of adminChatIds) {
+      try {
+        await sendTelegramText(args.telegramToken, chatId, text);
+      } catch (e) {
+        logWarn(`admin health ping failed (${chatId}): ${e.message || e}`);
+      }
+    }
+  }
+
+  const sourceHint = fileMode
+    ? `file ${media}`
+    : args.url
+      ? `url ${args.url}`
+      : "—";
+  await notifyAdmins(
+    `TPlus webcast UP\n` +
+      `${scriptDoc.missionName || scriptDoc.missionId}\n` +
+      `mode=${args.mode} · asr=${args.asr ? "on" : "off"}\n` +
+      `NET ${scriptDoc.launchApproxUtc || "—"}\n` +
+      `${sourceHint}`,
+  );
+  archive?.appendEvent("health_startup", {
+    missionId: scriptDoc.missionId,
+    mode: args.mode,
+  });
+
   // Park until media available
   if (!media) {
     logInfo(`Parking on URL (poll ${args.pollSec}s): ${args.url}`);
@@ -745,6 +785,7 @@ async function main() {
   }
 
   logInfo("Entering observe loop (Ctrl+C to stop)");
+  let firstOcrNotified = false;
 
   for (;;) {
     const wall = Date.now();
@@ -787,6 +828,20 @@ async function main() {
         const stall =
           b.stallMs > 8000 ? ` HOLD~${(b.stallMs / 1000).toFixed(0)}s` : "";
         logInfo(`clock ${formatMissionClock(b.tPlusSec)} (${b.source})${stall}`);
+        if (!firstOcrNotified) {
+          firstOcrNotified = true;
+          await notifyAdmins(
+            `TPlus webcast OCR lock\n` +
+              `${scriptDoc.missionName || scriptDoc.missionId}\n` +
+              `clock ${formatMissionClock(b.tPlusSec)} (${b.source})\n` +
+              `frame+ocr ${grabMs}ms`,
+          );
+          archive?.appendEvent("health_first_ocr", {
+            clockSec: b.tPlusSec,
+            source: b.source,
+            grabMs,
+          });
+        }
       } else {
         logInfo("clock — (no HUD / OCR miss)");
       }

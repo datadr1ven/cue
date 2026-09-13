@@ -48,6 +48,34 @@ export async function uploadTelegramFile(token, chatId, filePath, opts = {}) {
 /**
  * @param {string} token
  * @param {number|string} chatId
+ * @param {string} text
+ * @param {{ silent?: boolean }} [opts]
+ * @returns {Promise<{ messageId: number|null, chatId: number }>}
+ */
+export async function sendTelegramText(token, chatId, text, opts = {}) {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: String(text),
+      disable_notification: opts.silent !== false,
+      disable_web_page_preview: true,
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!json.ok) {
+    throw new Error(json.description || "telegram sendMessage failed");
+  }
+  return {
+    messageId: json.result?.message_id ?? null,
+    chatId: Number(chatId),
+  };
+}
+
+/**
+ * @param {string} token
+ * @param {number|string} chatId
  * @param {number} messageId
  */
 export async function deleteTelegramMessage(token, chatId, messageId) {
