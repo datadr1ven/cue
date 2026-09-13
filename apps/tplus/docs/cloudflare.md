@@ -95,27 +95,29 @@ Stop any local `npm run starship:bot` (polling conflicts with webhook).
 4. Everyone receives fan-out alerts.  
 5. User-facing **/** menu is registered via `setMyCommands` on the first webhook (ops commands stay hidden).
 
-## New mission (Starship, Starlink, …)
+## New mission / launch
 
-Same path for every vehicle — data-driven `/ops` from the script:
+**No Worker redeploy.** The laptop loads NET + Official Webcast + timeline from
+[Launch Library 2](https://ll.thespacedevs.com/docs/) at `webcast:live` start.
+`POST /suggest` is a pure fan-out (formats the alert from the JSON body).
 
-1. Add `missions/flights/<id>-script.json` (NET + ordered `script[]` milestones; optional `webcastUrl` for X broadcast).  
-2. Register in `missions/index.json` (optional `number`; set `defaultMissionId` for the active/upcoming flight — `/mission use` is retired).  
-3. **Import the new JSON in** `src/missions/bundle.js` (Workers cannot read the filesystem).  
-4. Use `actionId`s from the `LAUNCH_ACTIONS` catalog (`packages/cue/src/engine/domains/starship/actions.js`). Add a catalog row only if you need a *new* kind of milestone.  
-5. `npm run validate:missions && npm run smoke:tplus`  
-6. `npm run cf:deploy:tplus`  
+```bash
+npm run webcast:live -- --ll2-id <uuid> --mode test
+# or: --ll2-search 'O3b mPower' / --ll2-slug falcon-9-…
+```
 
-Webcast loads the mission via `--mission <id>` (and `/suggest` body.missionId).
+Optional file missions (`--mission <id>`) remain for fixtures/replay. Deploy the
+Worker only when **Worker code** changes (enroll, `/suggest` shape, admin cmds).
 
 ## Webcast emit → test | ops
 
-Laptop locks mission time (OCR or `--liftoff-file-sec`), walks the script, POSTs each milestone to `/suggest`. **No Approve/Dismiss** — fan-out is immediate:
+Laptop locks mission time (OCR), walks the script, POSTs each milestone to `/suggest`.
+**No Approve/Dismiss** — fan-out is immediate:
 
 | `mode` | Audience |
 |--------|----------|
 | `test` (default) | `TELEGRAM_ADMIN_IDS` only (messages prefixed `🧪 TEST`) |
-| `ops` | All subscribers |
+| `ops` | All keys in KV `users:v1` (see `/start` / `/stop`) |
 
 ```bash
 npx wrangler secret put TPLUS_SUGGEST_SECRET
@@ -123,12 +125,15 @@ npx wrangler secret put TPLUS_SUGGEST_SECRET
 export TPLUS_SUGGEST_URL=https://tplus.scenicminddigital.workers.dev/suggest
 export TPLUS_SUGGEST_SECRET=…
 
-# Rehearsal — admins only (uses mission webcastUrl when --url omitted)
-npm run webcast:live -- --mission o3b-mpower-f --mode test
+# Rehearsal — admins only (LL2 Official Webcast when --url omitted)
+npm run webcast:live -- --ll2-search 'O3b mPower' --mode test
 
-# Override stream, or launch night for everyone
-npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission o3b-mpower-f --mode ops
+# Launch night
+npm run webcast:live -- --ll2-id ad358a4d-c541-409b-9366-9c2f2da4aeb9 --mode ops
 ```
+
+`/suggest` body (Bearer `TPLUS_SUGGEST_SECRET`):  
+`{ actionId, label, scriptTPlusSec, missionName, mode, artifacts? }` or `{ text, mode }`.
 
 ## Migrate existing `data/users.json`
 

@@ -5,6 +5,9 @@
  * Admins: /note · /broadcast · /inbox · /reply
  * Launch events: laptop webcast:live → POST /suggest (test|ops).
  *
+ * /suggest is mission-agnostic fan-out: the laptop owns LL2/script/OCR.
+ * Deploy this Worker for code changes only — not when missions change.
+ *
  * Bindings (wrangler.toml):
  *   KV  TPLUS_KV
  * Secrets:
@@ -16,13 +19,7 @@
  *   WEBHOOK_SECRET       (optional path secret)
  */
 
-import { createStarshipSession } from "../src/starship-session.js";
 import { formatTPlus } from "cue/engine/domains/starship/index.js";
-import {
-  bundledLoadMission,
-  bundledListMissions,
-  bundledFormatEta,
-} from "../src/missions/bundle.js";
 import {
   TPLUS_USER_COMMANDS,
   parseNoteOrBroadcast,
@@ -44,14 +41,7 @@ import {
   resolveInboxTarget,
 } from "cue/telegram-inbox.js";
 
-const loader = {
-  loadMission: bundledLoadMission,
-  listMissions: bundledListMissions,
-  formatEta: bundledFormatEta,
-};
-
 const KV_USERS = "users:v1";
-const KV_SESSION = "session:v1";
 
 /** Once per isolate — keep Telegram / menu in sync with TPLUS_USER_COMMANDS */
 let commandsRegistered = false;
@@ -257,9 +247,44 @@ function normalizeArtifacts(raw) {
 }
 
 /**
- * Laptop webcast emitter → immediate fan-out.
+ * Format a launch milestone line from /suggest body fields (no mission catalog).
+ * @param {{ actionId?: string, label?: string, missionName?: string|null, scriptTPlusSec?: number|null }} body
+ */
+function formatSuggestAlert(body) {
+  if (body?.text != null && String(body.text).trim()) {
+    return String(body.text).trim();
+  }
+  const actionId = body?.actionId != null ? String(body.actionId).trim() : "";
+  const label =
+    (body?.label != null && String(body.label).trim()) || actionId || "update";
+  const scriptT =
+    body?.scriptTPlusSec != null && Number.isFinite(Number(body.scriptTPlusSec))
+      ? Number(body.scriptTPlusSec)
+      : null;
+  const tBit =
+    scriptT != null ? `T+${formatTPlus(scriptT)}` : "T+—";
+  const missionName =
+    body?.missionName != null && String(body.missionName).trim()
+      ? String(body.missionName).trim()
+      : null;
+  const emoji =
+    actionId === "liftoff"
+      ? "🚀"
+      : actionId === "stage_sep" || actionId === "hot_stage"
+        ? "🔥"
+        : "✨";
+  return missionName
+    ? `${emoji} ${missionName} · ${tBit} — ${label}`
+    : `${emoji} ${tBit} — ${label}`;
+}
+
+/**
+ * Laptop webcast emitter → immediate fan-out (mission-agnostic).
  * Body.mode: "test" (admins only, default) | "ops" (all subscribers).
  * Auth: Bearer TPLUS_SUGGEST_SECRET
+ *
+ * Preferred body: { actionId, label, scriptTPlusSec, missionName, mode, artifacts? }
+ * Or { text, mode } for a fully preformatted alert.
  */
 async function handleSuggestPost(request, env, kv) {
   if (!suggestSecretOk(env, request)) {
@@ -271,10 +296,17 @@ async function handleSuggestPost(request, env, kv) {
   } catch {
     return new Response("bad json", { status: 400 });
   }
+
+  const hasText = body?.text != null && String(body.text).trim();
   const actionId = body?.actionId != null ? String(body.actionId).trim() : "";
-  if (!actionId) {
-    return new Response('need { "actionId": "…" }', { status: 400 });
+  const label = body?.label != null ? String(body.label).trim() : "";
+  if (!hasText && !actionId && !label) {
+    return new Response(
+      'need { "text": "…" } or { "actionId"|"label", "missionName"?, "scriptTPlusSec"? }',
+      { status: 400 },
+    );
   }
+
   const modeRaw = String(body.mode || body.audience || "test").toLowerCase();
   const mode = modeRaw === "ops" || modeRaw === "live" ? "ops" : "test";
   const admins = parseAdminIds(env);
@@ -283,66 +315,22 @@ async function handleSuggestPost(request, env, kv) {
   }
 
   const artifacts = normalizeArtifacts(body.artifacts);
-  const missionId = body.missionId != null ? String(body.missionId) : null;
-  const evidence =
-    body.evidence && typeof body.evidence === "object" ? body.evidence : {};
+  // evidence is accepted for logs/clients but not shown to subscribers
+  void body.evidence;
 
-  const session = await getSession(env, kv);
-  if (missionId && session.scriptDoc?.missionId !== missionId) {
-    const r = session.loadMission(missionId);
-    if (r.ok) await persistSession(kv, session);
-  }
-
-  const result = await session.fire(actionId);
-  await persistSession(kv, session);
-  if (!result.ok) {
-    return Response.json(
-      { ok: false, error: result.error || "fire failed", mode },
-      { status: 400 },
-    );
-  }
-
-  // Prefer script T+ for schedule-driven emits (stable; matches mission card).
-  // Session wall-clock T+ drifts vs OCR/screenshot when fire() lags the HUD.
-  const label =
-    (body.label != null && String(body.label).trim()) ||
-    result.action?.label ||
-    actionId;
-  const scriptT =
-    body.scriptTPlusSec != null && Number.isFinite(Number(body.scriptTPlusSec))
-      ? Number(body.scriptTPlusSec)
-      : result.action?.scriptTPlusSec;
-  const tBit =
-    scriptT != null && Number.isFinite(scriptT)
-      ? `T+${formatTPlus(scriptT)}`
-      : "T+—";
-  const missionName =
-    session.scriptDoc?.missionName || body.missionName || null;
-  const emoji =
-    actionId === "liftoff"
-      ? "🚀"
-      : actionId === "stage_sep" || actionId === "hot_stage"
-        ? "🔥"
-        : "✨";
-  let alertText = missionName
-    ? `${emoji} ${missionName} · ${tBit} — ${label}`
-    : `${emoji} ${tBit} — ${label}`;
+  let alertText = formatSuggestAlert(body);
   if (mode === "test") {
     alertText = `🧪 TEST · ${alertText}`;
   }
-  // Keep ASR / other weak evidence in the JSON body for logs — do not
-  // surface to subscribers until those signals are sharper.
 
   const audience =
-    mode === "test"
-      ? admins
-      : await subscriberIds(kv, env);
+    mode === "test" ? admins : await subscriberIds(kv, env);
   const n = await fanOutTo(env, audience, alertText, { artifacts });
 
   return Response.json({
     ok: true,
     mode,
-    actionId,
+    actionId: actionId || null,
     delivered: n,
     artifacts: artifacts.length,
     alertText,
@@ -430,7 +418,7 @@ async function forceSetCommands(env) {
  * @param {string} text
  * @param {string|null} photoFileId
  */
-async function sendNoteOrBroadcast(env, kv, session, chatId, kind, text, photoFileId) {
+async function sendNoteOrBroadcast(env, kv, chatId, kind, text, photoFileId) {
   const body = (text || "").trim();
   if (!body && !photoFileId) {
     await reply(
@@ -443,16 +431,7 @@ async function sendNoteOrBroadcast(env, kv, session, chatId, kind, text, photoFi
     return;
   }
   const label = body || "📷";
-  const r =
-    kind === "note"
-      ? await session.fireNote(label)
-      : await session.fireBroadcast(label);
-  if (!r.ok) {
-    await reply(env, chatId, r.error || "failed");
-    return;
-  }
-  await persistSession(kv, session);
-  const alertText = r.alerts[0]?.text || label;
+  const alertText = kind === "note" ? `📝 ${label}` : `📢 ${label}`;
   const n = await fanOut(env, kv, alertText, { photoFileId });
   const withPhoto = photoFileId ? " (with photo)" : "";
   await reply(
@@ -464,31 +443,15 @@ async function sendNoteOrBroadcast(env, kv, session, chatId, kind, text, photoFi
   );
 }
 
-async function getSession(env, kv) {
-  const saved = await kvGetJson(kv, KV_SESSION, null);
-  const missionRef = saved?.missionId || env.STARSHIP_MISSION || "default";
-  const session = createStarshipSession({
-    missionRef,
-    minSeverity: 1,
-    loader,
-  });
-  if (saved) session.hydrate(saved);
-  return session;
-}
-
-async function persistSession(kv, session) {
-  await kvPutJson(kv, KV_SESSION, session.exportState());
-}
-
 function userHelp() {
   return (
-    `TPlus — sparse SpaceX launch alerts\n\n` +
+    `TPlus — sparse launch alerts\n\n` +
     `High-signal milestones from the live webcast worker (test or ops mode).\n\n` +
     `/start — subscribe\n` +
     `/status — am I subscribed?\n` +
     `/stop — unsubscribe\n` +
     `/help — this message\n\n` +
-    `Unofficial; not affiliated with SpaceX.`
+    `Unofficial; not affiliated with SpaceX or other LSPs.`
   );
 }
 
@@ -522,7 +485,6 @@ async function handleMessage(env, kv, message) {
   const userId = message.from?.id;
   const text = cmdText(message);
   const photoFileId = largestPhotoFileId(message);
-  const session = await getSession(env, kv);
   const admin = isAdmin(env, userId);
 
   // Photo with caption /note … or /broadcast … (or inbox if unlabeled free-text)
@@ -554,7 +516,6 @@ async function handleMessage(env, kv, message) {
       await sendNoteOrBroadcast(
         env,
         kv,
-        session,
         chatId,
         parsed.kind,
         parsed.text,
@@ -660,7 +621,6 @@ async function handleMessage(env, kv, message) {
     await sendNoteOrBroadcast(
       env,
       kv,
-      session,
       chatId,
       "note",
       stripCmd(text, "note"),
@@ -677,7 +637,6 @@ async function handleMessage(env, kv, message) {
     await sendNoteOrBroadcast(
       env,
       kv,
-      session,
       chatId,
       "broadcast",
       stripCmd(text, "broadcast"),

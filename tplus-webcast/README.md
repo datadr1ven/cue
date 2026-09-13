@@ -40,3 +40,5 @@ T−30 → window close +30.
 If NET slips outside the published window, update crontab or start manually.
 
 Requires `TPLUS_SUGGEST_*` + Telegram secrets in `~/cue/.env`. CLI `--mode ops` overrides `TPLUS_MODE=test`.
+
+Worker `/suggest` is mission-agnostic (no CF redeploy when LL2/NET changes). Deploy the Worker only for Worker code changes.

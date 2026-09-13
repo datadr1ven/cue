@@ -67,8 +67,7 @@ resolve_start() {
   fi
   if [[ -n "${LL2_IDS[$a]:-}" ]]; then
     RUN_KEY="$a"
-    # --mission alias keeps CF bundle loadMission working until dumb /suggest
-    LIVE_ARGS=(--ll2-id "${LL2_IDS[$a]}" --mission "$a")
+    LIVE_ARGS=(--ll2-id "${LL2_IDS[$a]}")
     return 0
   fi
   if [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then
