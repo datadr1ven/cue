@@ -1,0 +1,294 @@
+{
+  "results": [
+    {
+      "id": "8effc13a-c658-4d2e-9f15-8dba4d7fe2dd",
+      "slug": "vega-c-sentinel-3c-flex",
+      "name": "Vega-C | Sentinel-3C & FLEX",
+      "net": "2026-09-15T01:21:07Z",
+      "window_start": "2026-09-15T01:21:07Z",
+      "window_end": "2026-09-15T01:21:07Z",
+      "webcast_live": false,
+      "vidURLs": [
+        {
+          "priority": 10,
+          "source": "youtube.com",
+          "publisher": "Avio SpA",
+          "title": "Vega C | Flight VV30 | Sentinel-3C - FLEX | Avio",
+          "description": "On September 14th at 10.21 PM Kourou time (01.21 UTC; 03.21 AM CEST on September 15th), Avio will launch two Earth observation satellites: the Sentinel-3C of the Copernicus programme for the European Commission and the FLEX Earth Explorer for the European Space Agency (ESA). The mission, designated \u201cVV30\u201d, will be carried out by a Vega C launcher, the second operated by Avio, lifting off from the European Spaceport in French Guiana.\n \nThe satellites will be released into Sun-Synchronous Orbit at an altitude of about 820 km with an inclination of 98.6\u00b0. The duration of the launch (from lift-off to separation of the last satellite) is 116 minutes.\n \nCopernicus Sentinel-3C is the third satellite of the Sentinel-3 mission, dedicated to monitoring the health of our planet by observing ocea...",
+          "feature_image": "https://i.ytimg.com/vi/Rb4CN2avz90/maxresdefault_live.jpg",
+          "url": "https://www.youtube.com/watch?v=Rb4CN2avz90",
+          "type": {
+            "id": 1,
+            "name": "Official Webcast"
+          },
+          "language": {
+            "id": 1,
+            "name": "English",
+            "code": "en"
+          },
+          "start_time": "2026-09-15T00:45:00Z",
+          "end_time": null
+        },
+        {
+          "priority": 11,
+          "source": "youtube.com",
+          "publisher": "European Space Agency, ESA",
+          "title": "FLEX and Sentinel-3C launch (Official broadcast)",
+          "description": "ESA\u2019s FLEX satellite and the Copernicus Sentinel-3C satellite are set to launch on 15 September at 03:21 CEST (14 September at 22:21 local time). Watch the launch programme live from Europe\u2019s Spaceport in French Guiana, with streaming starting at 02:50 CEST and continuing until 05:36 CEST.\n\nFLEX will provide new insights into how plants function by measuring the faint fluorescence they emit as they capture sunlight during photosynthesis. This unique measurement will help scientists better understand plant health and productivity, as well as how vegetation responds to a changing environment.\n\nSentinel-3C is the third satellite in the Sentinel-3 mission, which systematically monitors Earth\u2019s oceans, land, ice and atmosphere. The mission as a whole contributes to a better understanding o...",
+          "feature_image": "https://i.ytimg.com/vi/fmrgyh5s-is/maxresdefault_live.jpg",
+          "url": "https://www.youtube.com/watch?v=fmrgyh5s-is",
+          "type": {
+            "id": 1,
+            "name": "Official Webcast"
+          },
+          "language": {
+            "id": 1,
+            "name": "English",
+            "code": "en"
+          },
+          "start_time": "2026-09-15T00:50:00Z",
+          "end_time": null
+        }
+      ],
+      "timeline": [
+        {
+          "type": {
+            "id": 10,
+            "abbrev": "Liftoff",
+            "description": "First upwards movement of the rocket"
+          },
+          "relative_time": "P0D"
+        },
+        {
+          "type": {
+            "id": 13,
+            "abbrev": "Stage 2 Separation",
+            "description": "Separation of the second stage from the first"
+          },
+          "relative_time": "PT2M26S"
+        },
+        {
+          "type": {
+            "id": 74,
+            "abbrev": "Stage 3 Separation",
+            "description": "Separation of the third stage from the second"
+          },
+          "relative_time": "PT4M31S"
+        },
+        {
+          "type": {
+            "id": 75,
+            "abbrev": "Stage 3 Ignition",
+            "description": "Third stage engine ignites."
+          },
+          "relative_time": "PT4M37S"
+        },
+        {
+          "type": {
+            "id": 15,
+            "abbrev": "Fairing Separation",
+            "description": "Separation of the payload fairing"
+          },
+          "relative_time": "PT4M41S"
+        },
+        {
+          "type": {
+            "id": 30,
+            "abbrev": "Kick Stage Separation",
+            "description": "Separation of the kick stage from the previous stage"
+          },
+          "relative_time": "PT7M17S"
+        },
+        {
+          "type": {
+            "id": 32,
+            "abbrev": "Kick Stage Ignition",
+            "description": "Start of the kick stage engine"
+          },
+          "relative_time": "PT1H51S"
+        },
+        {
+          "type": {
+            "id": 33,
+            "abbrev": "Kick Stage Cut-off",
+            "description": "Cut-off of the kick stage engine"
+          },
+          "relative_time": "PT1H57M14S"
+        }
+      ],
+      "mission": {
+        "id": 6236,
+        "name": "Sentinel-3C & FLEX",
+        "description": "Sentinel-3C is the third satellite in the Sentinel-3 constellation, which provides high-accuracy optical, radar and altimetry data for marine and land services.\r\n\r\nThe Fluorescence Explorer (FLEX) satellite is a part of ESA's Earth Explorer program. The satellite will map vegetation fluorescence to quantify photosynthetic activity.",
+        "launch_designator": null,
+        "type": "Earth Science",
+        "orbit": {
+          "id": 17,
+          "name": "Sun-Synchronous Orbit",
+          "abbrev": "SSO"
+        },
+        "agencies": [
+          {
+            "id": 27,
+            "url": "https://ll.thespacedevs.com/2.2.0/agencies/27/",
+            "name": "European Space Agency",
+            "featured": false,
+            "type": "Multinational",
+            "country_code": "FRA,ITA,DEU,ESP,CHE,GBR,AUT,SWE,BEL,PRT,NLD,HUN,POL,DNK,CZE,ROU,NOR,FIN,GRC,EST,IRL,LUX,SVN",
+            "abbrev": "ESA",
+            "description": "The European Space Agency is an intergovernmental organisation of 22 member states. Established in 1975 and headquartered in Paris, France, ESA has a worldwide staff of about 2,000 employees.\r\n\r\nESA's space flight programme includes human spaceflight (mainly through participation in the International Space Station program); the launch and operation of unmanned exploration missions to other planets and the Moon; Earth observation, science and telecommunication; designing launch vehicles; and maintaining a major spaceport, the Guiana Space Centre at Kourou, French Guiana.",
+            "administrator": "Director General: Josef Aschbacher",
+            "founding_year": "1975",
+            "launchers": "Ariane | Vega",
+            "spacecraft": "Space Rider",
+            "launch_library_url": null,
+            "total_launch_count": 7,
+            "consecutive_successful_launches": 5,
+            "successful_launches": 6,
+            "failed_launches": 1,
+            "pending_launches": 1,
+            "consecutive_successful_landings": 0,
+            "successful_landings": 0,
+            "failed_landings": 0,
+            "attempted_landings": 0,
+            "info_url": "https://www.esa.int/",
+            "wiki_url": "https://en.wikipedia.org/wiki/European_Space_Agency",
+            "logo_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/european2520space2520agency_logo_20221130101442.png",
+            "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/esa_patch_float_image_20250211192109.png",
+            "nation_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/european2520space2520agency_logo_20221130101442.png"
+          }
+        ],
+        "info_urls": [],
+        "vid_urls": []
+      },
+      "pad": {
+        "id": 34,
+        "url": "https://ll.thespacedevs.com/2.2.0/pad/34/",
+        "agency_id": 115,
+        "name": "Ariane Launch Area 1 (ELV)",
+        "description": "ELA-1, now named Ensemble de Lancement Vega (short ELV), is a launch pad at the Centre Spatial Guyanais in French Guiana. It has been used to support launches of the Europa rocket, Ariane 1, Ariane 3, and is currently used to launch Vega rockets.",
+        "info_url": null,
+        "wiki_url": "https://en.wikipedia.org/wiki/ELA-1",
+        "map_url": "https://www.google.com/maps?q=5.236,-52.775",
+        "latitude": "5.236",
+        "longitude": "-52.775",
+        "location": {
+          "id": 13,
+          "url": "https://ll.thespacedevs.com/2.2.0/location/13/",
+          "name": "Guiana Space Centre, French Guiana",
+          "country_code": "GUF",
+          "description": "The Guiana Space Centre is a European spaceport to the northwest of Kourou in French Guiana, a region of France in South America. Kourou is located at a latitude of 5\u00b0. In operation since 1968, it is a suitable location for a spaceport because of its equatorial location and open sea to the east.",
+          "map_image": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/map_images/location_13_20200803142412.jpg",
+          "timezone_name": "America/Cayenne",
+          "total_launch_count": 335,
+          "total_landing_count": 0
+        },
+        "country_code": "GUF",
+        "map_image": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/map_images/pad_34_20200803143527.jpg",
+        "total_launch_count": 55,
+        "orbital_launch_attempt_count": 55
+      },
+      "rocket": {
+        "id": 7714,
+        "configuration": {
+          "id": 127,
+          "url": "https://ll.thespacedevs.com/2.2.0/config/launcher/127/",
+          "name": "Vega-C",
+          "active": true,
+          "reusable": false,
+          "description": "Vega-C is a single-body rocket nearly 35 m high with that weighs 210 tonnes on the launch pad. As with Vega, its main elements are three solid-propellant stages, an upper stage powered by a reignitable liquid-propellant engine and a payload fairing. Vega-C's P120C first stage replaces Vega\u2019s smaller P80 to provide a significant increase in thrust at liftoff. It is also used as boosters (2 or 4) for the Ariane 6 rocket.",
+          "family": "Vega",
+          "full_name": "Vega-C",
+          "manufacturer": {
+            "id": 159,
+            "url": "https://ll.thespacedevs.com/2.2.0/agencies/159/",
+            "name": "Avio S.p.A",
+            "featured": true,
+            "type": "Commercial",
+            "country_code": "ITA",
+            "abbrev": "Avio",
+            "description": "Avio S.p.A. is an Italian company operating in the aerospace sector with its head office in Colleferro near Rome, Italy. Founded in 1908, it is present in Italy and abroad with different commercial offices and 10 production sites.",
+            "administrator": "CEO: Giulio Ranzo",
+            "founding_year": "1908",
+            "launchers": "Vega",
+            "spacecraft": "",
+            "launch_library_url": null,
+            "total_launch_count": 1,
+            "consecutive_successful_launches": 1,
+            "successful_launches": 1,
+            "failed_launches": 0,
+            "pending_launches": 24,
+            "consecutive_successful_landings": 0,
+            "successful_landings": 0,
+            "failed_landings": 0,
+            "attempted_landings": 0,
+            "info_url": "https://www.avio.com/",
+            "wiki_url": "https://en.wikipedia.org/wiki/Avio",
+            "logo_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/avio2520s.p.a_logo_20221130103121.png",
+            "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/vega-c_image_20220713154437.jpg",
+            "nation_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/avio_social_log_image_20250211190007.jpg"
+          },
+          "program": [],
+          "variant": "",
+          "alias": "",
+          "min_stage": 4,
+          "max_stage": 4,
+          "length": 34.8,
+          "diameter": 3.0,
+          "maiden_flight": "2022-07-13",
+          "launch_cost": "48000000",
+          "launch_mass": 210,
+          "leo_capacity": 3300,
+          "gto_capacity": null,
+          "to_thrust": 2974,
+          "apogee": null,
+          "vehicle_range": null,
+          "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/vega-c_image_20220713154437.jpg",
+          "info_url": "https://www.arianespace.com/vehicle/vega/",
+          "wiki_url": "https://en.wikipedia.org/wiki/Vega_(rocket)",
+          "total_launch_count": 7,
+          "consecutive_successful_launches": 5,
+          "successful_launches": 6,
+          "failed_launches": 1,
+          "pending_launches": 22,
+          "attempted_landings": 0,
+          "successful_landings": 0,
+          "failed_landings": 0,
+          "consecutive_successful_landings": 0
+        },
+        "launcher_stage": [],
+        "spacecraft_stage": null
+      },
+      "launch_service_provider": {
+        "id": 159,
+        "url": "https://ll.thespacedevs.com/2.2.0/agencies/159/",
+        "name": "Avio S.p.A",
+        "featured": true,
+        "type": "Commercial",
+        "country_code": "ITA",
+        "abbrev": "Avio",
+        "description": "Avio S.p.A. is an Italian company operating in the aerospace sector with its head office in Colleferro near Rome, Italy. Founded in 1908, it is present in Italy and abroad with different commercial offices and 10 production sites.",
+        "administrator": "CEO: Giulio Ranzo",
+        "founding_year": "1908",
+        "launchers": "Vega",
+        "spacecraft": "",
+        "launch_library_url": null,
+        "total_launch_count": 1,
+        "consecutive_successful_launches": 1,
+        "successful_launches": 1,
+        "failed_launches": 0,
+        "pending_launches": 24,
+        "consecutive_successful_landings": 0,
+        "successful_landings": 0,
+        "failed_landings": 0,
+        "attempted_landings": 0,
+        "info_url": "https://www.avio.com/",
+        "wiki_url": "https://en.wikipedia.org/wiki/Avio",
+        "logo_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/avio2520s.p.a_logo_20221130103121.png",
+        "image_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/vega-c_image_20220713154437.jpg",
+        "nation_url": "https://thespacedevs-prod.nyc3.digitaloceanspaces.com/media/images/avio_social_log_image_20250211190007.jpg"
+      },
+      "url": "https://ll.thespacedevs.com/2.2.0/launch/8effc13a-c658-4d2e-9f15-8dba4d7fe2dd/"
+    }
+  ]
+}

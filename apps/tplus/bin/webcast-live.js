@@ -9,15 +9,16 @@
  *   --mode test  → fan-out to admins only (default, safe for rehearsal)
  *   --mode ops   → fan-out to all subscribers
  *
+ *   npm run webcast:live -- --ll2-id <uuid> --mode ops
+ *   npm run webcast:live -- --ll2-search 'O3b mPower' --mode test
  *   npm run webcast:live -- --mission o3b-mpower-f --mode test
- *   npm run webcast:live -- --url 'https://x.com/i/broadcasts/…' --mission starlink-sl-15-27 --mode test
  *   npm run webcast:live -- --video /tmp/roman-window.mp4 --mission roman-fh --play --dry-run
  *
- * If --url/--video omitted, uses mission script webcastUrl when present.
+ * If --url/--video omitted, uses LL2 Official Webcast or mission webcastUrl.
  */
 
 import { spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { tmpdir } from "os";
@@ -34,6 +35,7 @@ import {
   uploadTelegramFile,
   deleteTelegramMessage,
 } from "../src/webcast/tg-upload.js";
+import { loadScriptDocFromLl2 } from "../src/missions/ll2.js";
 
 const APP_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 /** Monorepo root (apps/tplus → ../..) — .venv-webcast lives here */
@@ -48,7 +50,11 @@ function parseArgs(argv) {
   const out = {
     url: null,
     video: null,
-    mission: "o3b-mpower-f",
+    mission: null, // file id / path; optional when --ll2-* set
+    ll2Id: null,
+    ll2Slug: null,
+    ll2Search: null,
+    requireOfficialWebcast: true,
     python: process.env.WEBCAST_PYTHON || DEFAULT_PYTHON,
     pollSec: 45,
     ocrEverySec: 5,
@@ -73,6 +79,10 @@ function parseArgs(argv) {
     if (a === "--url") out.url = next();
     else if (a === "--video") out.video = next();
     else if (a === "--mission") out.mission = next();
+    else if (a === "--ll2-id") out.ll2Id = next();
+    else if (a === "--ll2-slug") out.ll2Slug = next();
+    else if (a === "--ll2-search") out.ll2Search = next();
+    else if (a === "--allow-unofficial-webcast") out.requireOfficialWebcast = false;
     else if (a === "--python") out.python = next();
     else if (a === "--poll-sec") out.pollSec = Number(next());
     else if (a === "--ocr-every") out.ocrEverySec = Number(next());
@@ -103,20 +113,39 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
+  webcast:live --ll2-id <uuid> [--mode test|ops]
+  webcast:live --ll2-search <query> [--mode test|ops]
+  webcast:live --ll2-slug <slug> [--mode test|ops]
   webcast:live --mission <id> [--mode test|ops]
-  webcast:live --url <x-broadcast> --mission <id> [--mode test|ops]
-  webcast:live --video <mp4> --mission <id> [--play] [--dry-run] [--mode test]
+  webcast:live --video <mp4> --mission <id> [--play] [--dry-run]
 
 Always-on consumer: park until media/clock available, hold-aware OCR lock,
 POST milestones to CF /suggest for immediate fan-out.
 
-  --url / --video optional when the mission script has webcastUrl
-  --mode test   admins only (default; safe rehearsal)
-  --mode ops    all subscribers
-  --test / --ops   aliases
+  --ll2-*           load NET + Official Webcast + timeline from Launch Library 2
+  --url / --video   optional when LL2/mission provides webcastUrl
+  --mode test       admins only (default; safe rehearsal)
+  --mode ops        all subscribers
+  --test / --ops    aliases
 
 Env: TPLUS_SUGGEST_URL, TPLUS_SUGGEST_SECRET, TELEGRAM_TOKEN, TELEGRAM_ADMIN_IDS
+     LL2_TOKEN (optional; free tier is 15 req/hour/IP)
 `);
+}
+
+function ll2OptsFromArgs(args) {
+  const n = [args.ll2Id, args.ll2Slug, args.ll2Search].filter(Boolean).length;
+  if (n === 0) return null;
+  if (n > 1) {
+    throw new Error("Use only one of --ll2-id, --ll2-slug, --ll2-search");
+  }
+  return {
+    id: args.ll2Id || undefined,
+    slug: args.ll2Slug || undefined,
+    search: args.ll2Search || undefined,
+    officialOnly: args.requireOfficialWebcast,
+    requireWebcast: args.requireOfficialWebcast && !args.url && !args.video,
+  };
 }
 
 function resolveMission(ref) {
@@ -338,16 +367,48 @@ async function main() {
     throw new Error(`Python missing: ${args.python}`);
   }
 
-  const missionPath = resolveMission(args.mission);
-  const scriptDoc = JSON.parse(readFileSync(missionPath, "utf8"));
+  const ll2opts = ll2OptsFromArgs(args);
+  /** @type {object} */
+  let scriptDoc;
+  if (ll2opts) {
+    logInfo(
+      `Fetching LL2 launch (${args.ll2Id ? "id" : args.ll2Slug ? "slug" : "search"}=${args.ll2Id || args.ll2Slug || args.ll2Search})…`,
+    );
+    const loaded = await loadScriptDocFromLl2(ll2opts);
+    scriptDoc = loaded.scriptDoc;
+    // Until Worker /suggest is mission-agnostic, --mission with --ll2-* overrides
+    // missionId so CF can loadMission a bundled id (labels/T+ still from LL2 body).
+    if (args.mission) {
+      logInfo(
+        `suggest missionId override ${scriptDoc.missionId} → ${args.mission}`,
+      );
+      scriptDoc.missionId = args.mission;
+    }
+    for (const w of loaded.warnings || []) logWarn(`ll2: ${w}`);
+    if (loaded.unmapped?.length) {
+      logWarn(`ll2 unmapped abbrevs: ${[...new Set(loaded.unmapped)].join(", ")}`);
+    }
+    logInfo(
+      `LL2 → ${scriptDoc.missionId} · ${scriptDoc.missionName} · NET ${scriptDoc.launchApproxUtc} · script=${(scriptDoc.script || []).length} events`,
+    );
+  } else {
+    if (!args.mission) {
+      usage();
+      logError("Need --ll2-id|--ll2-slug|--ll2-search or --mission");
+      process.exit(1);
+    }
+    const missionPath = resolveMission(args.mission);
+    scriptDoc = JSON.parse(readFileSync(missionPath, "utf8"));
+  }
+
   if (!args.url && !args.video && scriptDoc.webcastUrl) {
     args.url = String(scriptDoc.webcastUrl).trim();
-    logInfo(`Using mission webcastUrl: ${args.url}`);
+    logInfo(`Using webcastUrl: ${args.url}`);
   }
   if (!args.url && !args.video) {
     usage();
     logError(
-      `Need --url, --video, or mission webcastUrl (mission=${args.mission})`,
+      `Need --url, --video, or webcastUrl from LL2/mission (mission=${scriptDoc.missionId})`,
     );
     process.exit(1);
   }
@@ -546,6 +607,7 @@ async function main() {
       label: row.label || row.actionId,
       scriptTPlusSec: Number(row.tPlusSec),
       missionId: scriptDoc.missionId,
+      missionName: scriptDoc.missionName || null,
       mode: args.mode,
       evidence: {
         sources: [
