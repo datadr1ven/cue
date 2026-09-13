@@ -10,7 +10,11 @@
 #
 set -euo pipefail
 
-CUE_ROOT="${CUE_ROOT:-/home/datadr1ven/cue}"
+# Resolve monorepo root from this script (apps/tplus/scripts → ../../..)
+# so cron works on any machine/user — never hardcode /home/<user>.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_DEFAULT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+CUE_ROOT="${CUE_ROOT:-$_DEFAULT_ROOT}"
 OUT_DIR="${OUT_DIR:-$CUE_ROOT/tplus-webcast}"
 RUN_DIR="${RUN_DIR:-$OUT_DIR/run}"
 LOG_DIR="${LOG_DIR:-$OUT_DIR/logs}"

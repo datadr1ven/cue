@@ -153,6 +153,9 @@ function buildCrontabBlock(entries) {
     `SHELL=/bin/bash`,
     `PATH=${REPO}/node_modules/.bin:/usr/local/bin:/usr/bin:/bin`,
     `MAILTO=""`,
+    `# CUE_ROOT/OUT_DIR: ctl also self-locates; set here so cron matches this checkout`,
+    `CUE_ROOT=${REPO}`,
+    `OUT_DIR=${OUT_DIR}`,
     ``,
   ];
   for (const e of entries) {
@@ -307,7 +310,7 @@ function ensurePlannerCron() {
   // Unique token so we don't match the comment inside the managed block
   const marker = "TPLUS_SCHEDULE_DAILY";
   const planner =
-    `0 6 * * * cd /home/datadr1ven/cue && /usr/bin/npm run schedule:tplus -w tplus -- --apply-crontab >> ${SCHED_LOG} 2>&1 # ${marker}`;
+    `0 6 * * * cd ${REPO} && /usr/bin/npm run schedule:tplus -w tplus -- --apply-crontab >> ${SCHED_LOG} 2>&1 # ${marker}`;
   if (current.includes(marker)) {
     return;
   }
