@@ -19,6 +19,7 @@ MODE="${WEBCAST_MODE:-ops}" # ops | test
 # Stable LL2 UUIDs for scheduled launches (prefer --ll2-id over search).
 declare -A LL2_IDS=(
   [o3b-mpower-f]=ad358a4d-c541-409b-9366-9c2f2da4aeb9
+  [vega-c-sentinel-3c-flex]=8effc13a-c658-4d2e-9f15-8dba4d7fe2dd
   [ussf-259]=17c71937-dd80-406f-bb47-0c9ee9a24276
   [starlink-sl-15-27]=d1471f9d-e9d0-4146-8e97-90863e48bfc8
 )
@@ -67,8 +68,11 @@ resolve_start() {
   fi
   if [[ -n "${LL2_IDS[$a]:-}" ]]; then
     RUN_KEY="$a"
-    # --mission = file fallback if LL2 is throttled/down at start
-    LIVE_ARGS=(--ll2-id "${LL2_IDS[$a]}" --mission "$a")
+    LIVE_ARGS=(--ll2-id "${LL2_IDS[$a]}")
+    # Optional file fallback only if we have a committed script JSON
+    if [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then
+      LIVE_ARGS+=(--mission "$a")
+    fi
     return 0
   fi
   if [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then

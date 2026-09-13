@@ -46,6 +46,7 @@ T−30 → window close +30.
 | Alias | LL2 id | Cron start (MDT) | Cron stop (MDT) |
 |-------|--------|------------------|-----------------|
 | `o3b-mpower-f` | `ad358a4d-…` | Sun Sep 13 **12:19** | Sun **14:46** |
+| `vega-c-sentinel-3c-flex` | `8effc13a-…` | Mon Sep 14 **18:51** | Mon **19:51** |
 | `ussf-259` | `17c71937-…` | Tue Sep 15 **18:30** | Tue **23:30** |
 | `starlink-sl-15-27` | `d1471f9d-…` | Sat Sep 19 **19:17** | Sun **00:17** |
 
