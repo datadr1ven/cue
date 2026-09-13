@@ -218,11 +218,13 @@ async function probeMediaUrl(pageUrl) {
 
 async function grabFrame(mediaPathOrUrl, outJpg, ssSec = null) {
   const args = ["-y", "-hide_banner", "-loglevel", "error"];
-  // File seeks: put -ss AFTER -i for frame-accurate HUD (slower, avoids keyframe snap).
+  // File seeks: -ss BEFORE -i (input seek). After -i forces a full decode from t=0
+  // to the target — on a 30–60min webcast that made the first OCR take minutes and
+  // left the loop stuck far behind --play. Keyframe snap (~1s) is fine for HUD OCR.
   // Live URLs: no -ss (grab near the live edge).
-  const accurateSs = ssSec != null && Number.isFinite(ssSec);
+  const seek = ssSec != null && Number.isFinite(ssSec);
+  if (seek) args.push("-ss", String(ssSec));
   args.push("-i", mediaPathOrUrl);
-  if (accurateSs) args.push("-ss", String(ssSec));
   args.push("-frames:v", "1", "-q:v", "3", outJpg);
   await runCmd("ffmpeg", args);
   return outJpg;
@@ -771,8 +773,15 @@ async function main() {
       //    (OCR duration was skewing coast ahead of the pixels).
       const grabWall = Date.now();
       const ssGrab = fileSsAt(grabWall);
+      const tGrab0 = Date.now();
       await grabFrame(media, framePath, ssGrab);
       const ocr = await ocrImage(args.python, framePath);
+      const grabMs = Date.now() - tGrab0;
+      if (grabMs > 2500) {
+        logWarn(
+          `slow frame+ocr ${grabMs}ms (fileSs=${ssGrab != null ? ssGrab.toFixed(1) : "live"})`,
+        );
+      }
       if (ocr.ok && ocr.clockSec != null) {
         const b = clock.updateFromOcr(ocr.clockSec, grabWall);
         const stall =
