@@ -460,6 +460,7 @@ function opsHelp() {
     userHelp() +
     `\n\nOps (admin)\n` +
     `/subscribers — count + list users:v1 (ops fan-out targets)\n` +
+    `/subscribers check — getChat probe (no messages sent)\n` +
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/inbox — read free-text messages from users\n` +
@@ -487,6 +488,7 @@ function formatSubscribersReport(data, adminIds = []) {
     `Subscribers (users:v1): ${n}`,
     `ops /suggest + /broadcast attempt all of these.`,
     `delivered count can be lower if Telegram rejects (user never started the bot, blocked, bad id).`,
+    `Use /subscribers check for a no-send getChat probe.`,
     ``,
   ];
   for (const u of rows) {
@@ -500,6 +502,61 @@ function formatSubscribersReport(data, adminIds = []) {
     lines.push(`${id}  ${role}  ${uname}  ${name}  since ${since}`.trimEnd());
   }
   if (!n) lines.push("(empty)");
+  let text = lines.join("\n");
+  if (text.length > 3900) {
+    text = text.slice(0, 3900) + "\n…";
+  }
+  return text;
+}
+
+/**
+ * Probe whether Telegram knows a private chat with this user (no message sent).
+ * @returns {Promise<{ ok: boolean, status: 'reachable'|'unreachable', errorCode?: number, description?: string }>}
+ */
+async function probeChatReachable(env, userId) {
+  const r = await tg(env, "getChat", { chat_id: Number(userId) });
+  if (r.ok) {
+    return { ok: true, status: "reachable" };
+  }
+  return {
+    ok: false,
+    status: "unreachable",
+    errorCode: r.error_code ?? r.parameters?.error_code ?? null,
+    description: r.description || "getChat failed",
+  };
+}
+
+/**
+ * @param {{ users: Record<string, object> }} data
+ * @param {number[]} adminIds
+ * @param {Array<{ user_id: number, status: string, errorCode?: number|null, description?: string }>} probes
+ */
+function formatSubscribersCheckReport(data, adminIds, probes) {
+  const adminSet = new Set(adminIds.map(Number));
+  const byId = new Map(probes.map((p) => [Number(p.user_id), p]));
+  const rows = Object.values(data.users || {}).sort(
+    (a, b) => Number(a.user_id) - Number(b.user_id),
+  );
+  const okN = probes.filter((p) => p.status === "reachable").length;
+  const badN = probes.length - okN;
+  const lines = [
+    `Subscriber check (getChat, no messages sent)`,
+    `reachable: ${okN} · unreachable: ${badN} · total: ${rows.length}`,
+    `reachable ≈ opened the bot at least once; not a hard guarantee vs block.`,
+    ``,
+  ];
+  for (const u of rows) {
+    const id = Number(u.user_id);
+    const role = u.role || (adminSet.has(id) ? "admin" : "subscriber");
+    const uname = u.username ? `@${u.username}` : "—";
+    const p = byId.get(id);
+    const st = p?.status || "?";
+    const detail =
+      st === "unreachable"
+        ? `  ${p.errorCode || ""} ${p.description || ""}`.trimEnd()
+        : "";
+    lines.push(`${st === "reachable" ? "OK" : "NO"}  ${id}  ${role}  ${uname}${detail}`);
+  }
   let text = lines.join("\n");
   if (text.length > 3900) {
     text = text.slice(0, 3900) + "\n…";
@@ -661,11 +718,34 @@ async function handleMessage(env, kv, message) {
     // Ensure env admins appear in the map (same as fan-out seeding)
     await subscriberIds(kv, env);
     const data = await loadUsers(kv);
-    await reply(
-      env,
-      chatId,
-      formatSubscribersReport(data, parseAdminIds(env)),
-    );
+    const admins = parseAdminIds(env);
+    const sub = stripCmd(
+      text.startsWith("/users") ? text.replace(/^\/users/i, "/subscribers") : text,
+      "subscribers",
+    )
+      .trim()
+      .toLowerCase();
+    if (sub === "check" || sub === "probe") {
+      await reply(env, chatId, "Checking getChat for each user (no messages)…");
+      const probes = [];
+      for (const u of Object.values(data.users || {})) {
+        const id = Number(u.user_id);
+        const p = await probeChatReachable(env, id);
+        probes.push({
+          user_id: id,
+          status: p.status,
+          errorCode: p.errorCode ?? null,
+          description: p.description || null,
+        });
+      }
+      await reply(
+        env,
+        chatId,
+        formatSubscribersCheckReport(data, admins, probes),
+      );
+      return;
+    }
+    await reply(env, chatId, formatSubscribersReport(data, admins));
     return;
   }
 
@@ -843,7 +923,7 @@ export default {
       }
     }
 
-    // Admin/laptop: subscriber count (same auth as /suggest)
+    // Admin/laptop: subscriber list (same auth as /suggest). ?check=1 → getChat probe
     if (request.method === "GET" && url.pathname === "/subscribers") {
       if (!suggestSecretOk(env, request)) {
         return new Response("unauthorized", { status: 401 });
@@ -852,19 +932,39 @@ export default {
         const kv = env.TPLUS_KV;
         await subscriberIds(kv, env);
         const data = await loadUsers(kv);
-        const users = Object.values(data.users || {}).map((u) => ({
-          user_id: Number(u.user_id),
-          role: u.role || null,
-          username: u.username || null,
-          first_name: u.first_name || null,
-          enrolledAt: u.enrolledAt || null,
-        }));
+        const doCheck = ["1", "true", "yes"].includes(
+          String(url.searchParams.get("check") || "").toLowerCase(),
+        );
+        const users = [];
+        for (const u of Object.values(data.users || {})) {
+          const row = {
+            user_id: Number(u.user_id),
+            role: u.role || null,
+            username: u.username || null,
+            first_name: u.first_name || null,
+            enrolledAt: u.enrolledAt || null,
+          };
+          if (doCheck) {
+            const p = await probeChatReachable(env, row.user_id);
+            row.chat = {
+              status: p.status,
+              errorCode: p.errorCode ?? null,
+              description: p.description || null,
+            };
+          }
+          users.push(row);
+        }
+        const reachable = doCheck
+          ? users.filter((u) => u.chat?.status === "reachable").length
+          : null;
         return Response.json({
           ok: true,
           count: users.length,
+          reachable,
           users,
-          note:
-            "ops fan-out attempts all users:v1; Telegram may reject users who never opened the bot",
+          note: doCheck
+            ? "getChat probe only — no messages sent; reachable ≈ opened bot once"
+            : "ops fan-out attempts all users:v1; Telegram may reject users who never opened the bot. Add ?check=1 to probe.",
         });
       } catch (e) {
         console.error("subscribers error", e);

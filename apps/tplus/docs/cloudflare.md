@@ -29,7 +29,10 @@ Not for OpenF1 MQTT (use a small VPS for GridWhisper/F1 if needed).
 | `/broadcast` “Sent to N” | **Successful Telegram sends**, not KV size — Telegram rejects users who never opened the bot, blocked it, or have a bad id |
 
 Admin: Telegram **`/subscribers`** (or `/users`) — count + list.  
-Laptop: `GET /subscribers` with `Authorization: Bearer $TPLUS_SUGGEST_SECRET`.
+Admin: **`/subscribers check`** — `getChat` probe per id (**no messages sent**); marks reachable vs unreachable.  
+Laptop: `GET /subscribers` or `GET /subscribers?check=1` with `Authorization: Bearer $TPLUS_SUGGEST_SECRET`.
+
+`mode=test` on `/suggest` fans out only to `TELEGRAM_ADMIN_IDS` (not the full subscriber list).
 
 ## Prerequisites
 
