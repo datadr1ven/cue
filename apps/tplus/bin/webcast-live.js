@@ -392,23 +392,30 @@ async function main() {
     logInfo(
       `Fetching LL2 launch (${args.ll2Id ? "id" : args.ll2Slug ? "slug" : "search"}=${args.ll2Id || args.ll2Slug || args.ll2Search})…`,
     );
-    const loaded = await loadScriptDocFromLl2(ll2opts);
-    scriptDoc = loaded.scriptDoc;
-    ll2Launch = loaded.launch || null;
-    // Optional: --mission with --ll2-* overrides missionId for display/compat
-    if (args.mission) {
+    try {
+      const loaded = await loadScriptDocFromLl2(ll2opts);
+      scriptDoc = loaded.scriptDoc;
+      ll2Launch = loaded.launch || null;
+      for (const w of loaded.warnings || []) logWarn(`ll2: ${w}`);
+      if (loaded.unmapped?.length) {
+        logWarn(
+          `ll2 unmapped abbrevs: ${[...new Set(loaded.unmapped)].join(", ")}`,
+        );
+      }
       logInfo(
-        `suggest missionId override ${scriptDoc.missionId} → ${args.mission}`,
+        `LL2 → ${scriptDoc.missionId} · ${scriptDoc.missionName} · NET ${scriptDoc.launchApproxUtc} · script=${(scriptDoc.script || []).length} events`,
       );
-      scriptDoc.missionId = args.mission;
+    } catch (e) {
+      if (args.mission) {
+        logWarn(
+          `LL2 failed (${e.message || e}); falling back to --mission ${args.mission}`,
+        );
+        const missionPath = resolveMission(args.mission);
+        scriptDoc = JSON.parse(readFileSync(missionPath, "utf8"));
+      } else {
+        throw e;
+      }
     }
-    for (const w of loaded.warnings || []) logWarn(`ll2: ${w}`);
-    if (loaded.unmapped?.length) {
-      logWarn(`ll2 unmapped abbrevs: ${[...new Set(loaded.unmapped)].join(", ")}`);
-    }
-    logInfo(
-      `LL2 → ${scriptDoc.missionId} · ${scriptDoc.missionName} · NET ${scriptDoc.launchApproxUtc} · script=${(scriptDoc.script || []).length} events`,
-    );
   } else {
     if (!args.mission) {
       usage();

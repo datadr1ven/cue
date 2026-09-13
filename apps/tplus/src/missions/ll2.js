@@ -302,8 +302,17 @@ function mapTimeline(timeline, opts = {}) {
  * @param {string} pathAndQuery e.g. "/launch/uuid/" or "/launch/upcoming/?search=…"
  * @param {{ token?: string|null, fetchImpl?: typeof fetch }} [opts]
  */
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * @param {string} pathAndQuery e.g. "/launch/uuid/" or "/launch/upcoming/?search=…"
+ * @param {{ token?: string|null, fetchImpl?: typeof fetch, maxRetries?: number }} [opts]
+ */
 export async function ll2Fetch(pathAndQuery, opts = {}) {
   const fetchImpl = opts.fetchImpl || fetch;
+  const maxRetries = opts.maxRetries ?? 3;
   const url = pathAndQuery.startsWith("http")
     ? pathAndQuery
     : `${LL2_BASE}${pathAndQuery.startsWith("/") ? "" : "/"}${pathAndQuery}`;
@@ -311,12 +320,25 @@ export async function ll2Fetch(pathAndQuery, opts = {}) {
   const token = opts.token || process.env.LL2_TOKEN || null;
   if (token) headers.Authorization = `Token ${token}`;
 
-  const res = await fetchImpl(url, { headers });
-  if (!res.ok) {
+  let lastErr = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetchImpl(url, { headers });
+    if (res.ok) return res.json();
+
     const text = await res.text().catch(() => "");
-    throw new Error(`LL2 ${res.status}: ${text.slice(0, 200)}`);
+    lastErr = new Error(`LL2 ${res.status}: ${text.slice(0, 200)}`);
+
+    if (res.status !== 429 || attempt === maxRetries) break;
+
+    // "Expected available in 473 seconds." or Retry-After header
+    const retryHeader = Number(res.headers.get("Retry-After") || 0);
+    const m = text.match(/available in\s+(\d+)\s+seconds/i);
+    let waitSec = retryHeader || (m ? Number(m[1]) : 60);
+    // Cap so a hung throttle doesn't block forever; cron has ~30m lead
+    waitSec = Math.min(Math.max(waitSec, 5), 600);
+    await sleep(waitSec * 1000);
   }
-  return res.json();
+  throw lastErr;
 }
 
 /**
