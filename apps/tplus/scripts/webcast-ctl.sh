@@ -98,7 +98,8 @@ cmd_start() {
   for x in "${LIVE_ARGS[@]}"; do
     args_q+=" $(printf '%q' "$x")"
   done
-  setsid bash -lc "cd '$CUE_ROOT' && npm run webcast:live --$args_q --mode '$MODE'" \
+  # --save-run archives under tplus-webcast/runs/ (meta, script, events, suggests)
+  setsid bash -lc "cd '$CUE_ROOT' && npm run webcast:live --$args_q --mode '$MODE' --save-run" \
     >>"$lf" 2>&1 < /dev/null &
   local pid=$!
   echo "$pid" >"$pf"

@@ -29,3 +29,9 @@ seemingly-good-data/
 marketing/*.mp4
 marketing/*-frame*.jpg
 tplus_hype_video.mp4
+monza-2026/
+
+# Durable webcast run archives (large; keep README)
+tplus-webcast/runs/
+tplus-webcast/logs/
+tplus-webcast/run/

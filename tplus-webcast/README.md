@@ -11,7 +11,19 @@ Unattended `webcast:live --mode ops`, resolving **NET + Official Webcast + timel
 ```
 
 Follow a run: `tail -f ~/cue/tplus-webcast/logs/<alias>.log`  
-Cron wrapper: `~/cue/tplus-webcast/logs/cron.log`
+Cron wrapper: `~/cue/tplus-webcast/logs/cron.log`  
+
+**Run archive** (cron passes `--save-run`):
+
+```text
+tplus-webcast/runs/<timestamp>-<missionId>/
+  meta.json       # start/end, mode, webcastUrl, ll2 id
+  script.json     # in-memory script used for the run
+  ll2-raw.json    # LL2 payload when --ll2-*
+  events.ndjson   # park / media_up / emit / suggest_ok / …
+  suggest/        # per-milestone request+response
+  frames/         # emit stills when artifacts enabled
+```
 
 Manual:
 

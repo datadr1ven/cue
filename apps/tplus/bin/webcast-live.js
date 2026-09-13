@@ -36,6 +36,7 @@ import {
   deleteTelegramMessage,
 } from "../src/webcast/tg-upload.js";
 import { loadScriptDocFromLl2 } from "../src/missions/ll2.js";
+import { createRunArchive } from "../src/webcast/run-archive.js";
 
 const APP_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 /** Monorepo root (apps/tplus → ../..) — .venv-webcast lives here */
@@ -72,6 +73,9 @@ function parseArgs(argv) {
     adminId: process.env.TELEGRAM_ADMIN_IDS?.split(",")[0]?.trim() || null,
     syncFileT: 0,
     leadSec: 0,
+    /** @type {string|null|false} false=off; null=default path; string=parent dir */
+    saveRun: null,
+    saveFrames: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -91,6 +95,16 @@ function parseArgs(argv) {
     else if (a === "--no-artifacts") out.artifacts = false;
     else if (a === "--play") out.play = true;
     else if (a === "--dry-run") out.dryRun = true;
+    else if (a === "--save-run") {
+      // optional path: --save-run  OR  --save-run /path/to/runs
+      const peek = argv[i + 1];
+      if (peek && !peek.startsWith("-")) {
+        out.saveRun = next();
+      } else {
+        out.saveRun = ""; // default parent
+      }
+    } else if (a === "--no-save-run") out.saveRun = false;
+    else if (a === "--no-save-frames") out.saveFrames = false;
     else if (a === "--mode") {
       out.mode = next();
       out.modeFromCli = true;
@@ -124,6 +138,8 @@ POST milestones to CF /suggest for immediate fan-out.
 
   --ll2-*           load NET + Official Webcast + timeline from Launch Library 2
   --url / --video   optional when LL2/mission provides webcastUrl
+  --save-run [dir]  durable archive under tplus-webcast/runs (or dir)
+  --no-save-run     disable archive
   --mode test       admins only (default; safe rehearsal)
   --mode ops        all subscribers
   --test / --ops    aliases
@@ -370,14 +386,16 @@ async function main() {
   const ll2opts = ll2OptsFromArgs(args);
   /** @type {object} */
   let scriptDoc;
+  /** @type {object|null} */
+  let ll2Launch = null;
   if (ll2opts) {
     logInfo(
       `Fetching LL2 launch (${args.ll2Id ? "id" : args.ll2Slug ? "slug" : "search"}=${args.ll2Id || args.ll2Slug || args.ll2Search})…`,
     );
     const loaded = await loadScriptDocFromLl2(ll2opts);
     scriptDoc = loaded.scriptDoc;
-    // Until Worker /suggest is mission-agnostic, --mission with --ll2-* overrides
-    // missionId so CF can loadMission a bundled id (labels/T+ still from LL2 body).
+    ll2Launch = loaded.launch || null;
+    // Optional: --mission with --ll2-* overrides missionId for display/compat
     if (args.mission) {
       logInfo(
         `suggest missionId override ${scriptDoc.missionId} → ${args.mission}`,
@@ -420,6 +438,28 @@ async function main() {
 
   const work = join(tmpdir(), `cue-live-${Date.now()}`);
   mkdirSync(work, { recursive: true });
+
+  /** @type {ReturnType<typeof createRunArchive>|null} */
+  let archive = null;
+  if (args.saveRun !== false && args.saveRun != null) {
+    const parent =
+      args.saveRun === ""
+        ? join(REPO_ROOT, "tplus-webcast", "runs")
+        : resolve(args.saveRun);
+    archive = createRunArchive({
+      parentDir: parent,
+      missionId: scriptDoc.missionId,
+      missionName: scriptDoc.missionName,
+      mode: args.mode,
+      webcastUrl: args.url,
+      ll2LaunchId: scriptDoc.ll2LaunchId || ll2Launch?.id || null,
+      dryRun: args.dryRun,
+    });
+    archive.writeScript(scriptDoc);
+    if (ll2Launch) archive.writeLl2Raw(ll2Launch);
+    logInfo(`run archive → ${archive.runDir}`);
+  }
+
   const clock = createClockBelief();
   const emitted = new Set();
   /** @type {{ phraseId: string, actionId: string|null, raw: string, tPlusSec: number|null }[]} */
@@ -430,6 +470,22 @@ async function main() {
   let syncWallMs = Date.now();
   let syncFileT = args.syncFileT || 0;
   let player = null;
+
+  const shutdown = (reason) => {
+    try {
+      archive?.finalize({ reason });
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on("SIGINT", () => {
+    shutdown("SIGINT");
+    process.exit(130);
+  });
+  process.on("SIGTERM", () => {
+    shutdown("SIGTERM");
+    process.exit(143);
+  });
 
   logInfo(
     `webcast:live mission=${scriptDoc.missionId} mode=${args.mode} dryRun=${args.dryRun} asr=${args.asr} artifacts=${args.artifacts}`,
@@ -448,13 +504,17 @@ async function main() {
   // Park until media available
   if (!media) {
     logInfo(`Parking on URL (poll ${args.pollSec}s): ${args.url}`);
+    archive?.appendEvent("park_start", { url: args.url, pollSec: args.pollSec });
     for (;;) {
       try {
         media = await probeMediaUrl(args.url);
         logInfo(`Media up: ${media.slice(0, 80)}…`);
+        archive?.appendEvent("media_up", { url: args.url });
+        archive?.writeMeta({ mediaUpAt: new Date().toISOString() });
         break;
       } catch (e) {
         logWarn(`waiting for broadcast… (${e.message || e})`);
+        archive?.appendEvent("park_wait", { error: String(e.message || e) });
         await sleep(args.pollSec * 1000);
       }
     }
@@ -583,6 +643,9 @@ async function main() {
         const still = join(work, `art-${key}.jpg`);
         // Grab NOW — this is the scheduled moment
         await grabFrame(media, still, ss);
+        if (args.saveFrames && archive) {
+          archive.saveFrame(still, `${key}.jpg`);
+        }
         const up = await uploadTelegramFile(
           args.telegramToken,
           args.adminId,
@@ -599,6 +662,10 @@ async function main() {
         mintMsgs.push({ chatId: up.chatId, messageId: up.messageId });
       } catch (e) {
         logWarn(`artifact upload: ${e.message || e}`);
+        archive?.appendEvent("artifact_error", {
+          actionId: key,
+          error: String(e.message || e),
+        });
       }
     }
 
@@ -638,12 +705,25 @@ async function main() {
       `EMIT script ${formatMissionClock(row.tPlusSec)} ${row.actionId} ` +
         `(clock ${formatMissionClock(belief.tPlusSec)}) → ${args.dryRun ? "dry-run" : args.mode}`,
     );
+    archive?.appendEvent("emit", {
+      actionId: row.actionId,
+      scriptTPlusSec: row.tPlusSec,
+      clockTPlusSec: belief.tPlusSec,
+      dryRun: args.dryRun,
+    });
     if (args.dryRun) {
       console.log(JSON.stringify({ type: "suggest", ...body }));
+      archive?.writeSuggest(key, body, { dryRun: true });
       return;
     }
     const r = await postSuggest(args.suggestUrl, args.suggestSecret, body);
     logInfo(`  delivered=${r?.delivered ?? "?"} mode=${r?.mode || args.mode}`);
+    archive?.writeSuggest(key, body, r);
+    archive?.appendEvent("suggest_ok", {
+      actionId: key,
+      delivered: r?.delivered ?? null,
+      mode: r?.mode || args.mode,
+    });
     if (args.telegramToken) {
       for (const m of mintMsgs) {
         await deleteTelegramMessage(
