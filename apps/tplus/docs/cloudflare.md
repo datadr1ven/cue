@@ -1,23 +1,35 @@
 # TPlus on Cloudflare Workers (free tier)
 
-Event-driven Telegram bot for **sparse SpaceX launch alerts**:  
-**webhook → Worker → Cue launch domain → sendMessage**.
+Event-driven Telegram bot for **sparse launch alerts**:  
+**webhook → Worker → sendMessage**, plus laptop `webcast:live` → **`POST /suggest`**.
 
-Subscribers and session state live in **KV**. Mission timelines (Starship, Falcon/Starlink, …) ship in the deploy bundle (git).
+Subscribers live in **KV**. Mission timelines / streams are resolved on the **laptop** (Launch Library 2); `/suggest` does not need a mission catalog redeploy.
 
 ## Why this stack
 
 | Concern | Choice |
 |---------|--------|
 | Always on (free) | Workers free tier + webhook (no polling process) |
-| Subscribers | KV key `users:v1` (not local `data/users.json`) |
-| Active mission / T+ clock | KV key `session:v1` |
+| Subscribers | KV key `users:v1` |
 | Free-text from users | KV key `inbox:v1` (admin `/inbox` / `/reply`) |
 | Admin inbox pings | KV `inbox:notify:v1` — digest coalesce (~10m quiet window) |
-| Schedule / live emit | `POST /suggest` (Bearer `TPLUS_SUGGEST_SECRET`) · `mode=test` admins only · `mode=ops` all subscribers |
-| New mission timelines | Commit JSON → `npm run validate:missions` → deploy |
+| Schedule / live emit | `POST /suggest` · `mode=test` admins · `mode=ops` all `users:v1` |
+| New launches | `webcast:live --ll2-*` on the laptop (no Worker redeploy) |
 
 Not for OpenF1 MQTT (use a small VPS for GridWhisper/F1 if needed).
+
+## Subscribers (`users:v1`)
+
+| Action | Effect |
+|--------|--------|
+| User `/start` | Upsert into `users:v1` → included in ops fan-out attempts |
+| User `/stop` | **Delete** from `users:v1` → no longer attempted |
+| Hand-add id to KV | Included in attempt list (no separate “confirmed start” flag) |
+| `TELEGRAM_ADMIN_IDS` | Auto-seeded into `users:v1` on fan-out / `/subscribers` |
+| `/broadcast` “Sent to N” | **Successful Telegram sends**, not KV size — Telegram rejects users who never opened the bot, blocked it, or have a bad id |
+
+Admin: Telegram **`/subscribers`** (or `/users`) — count + list.  
+Laptop: `GET /subscribers` with `Authorization: Bearer $TPLUS_SUGGEST_SECRET`.
 
 ## Prerequisites
 

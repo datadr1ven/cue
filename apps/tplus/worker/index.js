@@ -2,7 +2,7 @@
  * Cloudflare Worker — TPlus Telegram (enroll + deliver shell).
  *
  * Always-on: /start · /help · /status · /stop · inbox.
- * Admins: /note · /broadcast · /inbox · /reply
+ * Admins: /note · /broadcast · /inbox · /reply · /subscribers
  * Launch events: laptop webcast:live → POST /suggest (test|ops).
  *
  * /suggest is mission-agnostic fan-out: the laptop owns LL2/script/OCR.
@@ -459,6 +459,7 @@ function opsHelp() {
   return (
     userHelp() +
     `\n\nOps (admin)\n` +
+    `/subscribers — count + list users:v1 (ops fan-out targets)\n` +
     `/note <text> — freeform alert (or photo + caption /note …)\n` +
     `/broadcast <text> — announcement (or photo + caption /broadcast …)\n` +
     `/inbox — read free-text messages from users\n` +
@@ -468,6 +469,42 @@ function opsHelp() {
     `(launch events: laptop webcast:live → POST /suggest)\n` +
     `(new inbox messages ping admins; batched ~10m)`
   );
+}
+
+/**
+ * Human-readable report of KV users:v1 (ops fan-out attempt list).
+ * Note: Telegram may still fail delivery if the user never opened the bot.
+ * @param {{ users: Record<string, object> }} data
+ * @param {number[]} adminIds
+ */
+function formatSubscribersReport(data, adminIds = []) {
+  const adminSet = new Set(adminIds.map(Number));
+  const rows = Object.values(data.users || {}).sort(
+    (a, b) => Number(a.user_id) - Number(b.user_id),
+  );
+  const n = rows.length;
+  const lines = [
+    `Subscribers (users:v1): ${n}`,
+    `ops /suggest + /broadcast attempt all of these.`,
+    `delivered count can be lower if Telegram rejects (user never started the bot, blocked, bad id).`,
+    ``,
+  ];
+  for (const u of rows) {
+    const id = Number(u.user_id);
+    const role = u.role || (adminSet.has(id) ? "admin" : "subscriber");
+    const uname = u.username ? `@${u.username}` : "—";
+    const name = u.first_name || "";
+    const since = u.enrolledAt
+      ? String(u.enrolledAt).slice(0, 10)
+      : "—";
+    lines.push(`${id}  ${role}  ${uname}  ${name}  since ${since}`.trimEnd());
+  }
+  if (!n) lines.push("(empty)");
+  let text = lines.join("\n");
+  if (text.length > 3900) {
+    text = text.slice(0, 3900) + "\n…";
+  }
+  return text;
 }
 
 /** Command line from text message or photo caption. */
@@ -609,6 +646,25 @@ async function handleMessage(env, kv, message) {
         (admin
           ? "Ops: /note · /broadcast · /inbox — or run webcast:live --mode test|ops"
           : "Use /status · /help · /stop"),
+    );
+    return;
+  }
+
+  if (
+    text.startsWith("/subscribers") ||
+    text.startsWith("/users")
+  ) {
+    if (!admin) {
+      await reply(env, chatId, "Admin only.");
+      return;
+    }
+    // Ensure env admins appear in the map (same as fan-out seeding)
+    await subscriberIds(kv, env);
+    const data = await loadUsers(kv);
+    await reply(
+      env,
+      chatId,
+      formatSubscribersReport(data, parseAdminIds(env)),
     );
     return;
   }
@@ -777,12 +833,41 @@ export default {
       return new Response("TPlus worker ok", { status: 200 });
     }
 
-    // Laptop schedule/OCR → admin Approve/Dismiss
+    // Laptop schedule/OCR → immediate fan-out
     if (request.method === "POST" && url.pathname === "/suggest") {
       try {
         return await handleSuggestPost(request, env, env.TPLUS_KV);
       } catch (e) {
         console.error("suggest error", e);
+        return new Response("error", { status: 500 });
+      }
+    }
+
+    // Admin/laptop: subscriber count (same auth as /suggest)
+    if (request.method === "GET" && url.pathname === "/subscribers") {
+      if (!suggestSecretOk(env, request)) {
+        return new Response("unauthorized", { status: 401 });
+      }
+      try {
+        const kv = env.TPLUS_KV;
+        await subscriberIds(kv, env);
+        const data = await loadUsers(kv);
+        const users = Object.values(data.users || {}).map((u) => ({
+          user_id: Number(u.user_id),
+          role: u.role || null,
+          username: u.username || null,
+          first_name: u.first_name || null,
+          enrolledAt: u.enrolledAt || null,
+        }));
+        return Response.json({
+          ok: true,
+          count: users.length,
+          users,
+          note:
+            "ops fan-out attempts all users:v1; Telegram may reject users who never opened the bot",
+        });
+      } catch (e) {
+        console.error("subscribers error", e);
         return new Response("error", { status: 500 });
       }
     }
