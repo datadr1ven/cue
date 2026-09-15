@@ -210,13 +210,19 @@ function runCmd(cmd, args, opts = {}) {
 
 async function probeMediaUrl(pageUrl) {
   const ytdlp = resolveYtDlp();
+  // Prefer ≤720p VIDEO. Leading with bestaudio (old string) matches first on
+  // YouTube and returns an audio-only URL — grabFrame then never sees a HUD
+  // (Vega VV30: startup ping, zero OCR lock / no artifacts).
+  // X SpaceX replays are muxed m3u8 → best[height<=720] still works.
   const { out } = await runCmd(ytdlp, [
     "-f",
-    "bestaudio/best[height<=720]/best",
+    "bestvideo[height<=720]/best[height<=720]/best",
     "-g",
     pageUrl,
   ]);
-  const line = out.trim().split("\n").filter(Boolean).at(-1);
+  const lines = out.trim().split("\n").filter(Boolean);
+  // If a merge format ever sneaks in, yt-dlp -g prints video then audio.
+  const line = lines[0];
   if (!line) throw new Error("yt-dlp returned no media URL");
   return line;
 }
