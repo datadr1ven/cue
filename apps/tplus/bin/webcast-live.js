@@ -752,13 +752,55 @@ async function main() {
     }
   }
 
+  let liftoffFallbackGaveUp = false;
+
+  /** Resolve extrapolated / LL2 liftoff wall for fallback + give-up logs. */
+  function liftoffFallbackAnchor(raw) {
+    if (raw?.liftoffWallMs != null && Number.isFinite(raw.liftoffWallMs)) {
+      return { liftoffWall: raw.liftoffWallMs, via: "ocr-extrapolated" };
+    }
+    if (!fileMode && scriptDoc.launchApproxUtc) {
+      const net = Date.parse(String(scriptDoc.launchApproxUtc));
+      if (Number.isFinite(net)) return { liftoffWall: net, via: "ll2-net" };
+    }
+    return { liftoffWall: null, via: null };
+  }
+
+  /**
+   * On OCR miss: show presumed coast clock if we still have countdown belief,
+   * else plain miss. Makes HUD-drop / hybrid path visible in logs.
+   */
+  function logClockMiss(atWall = Date.now()) {
+    const b = clock.now(atWall);
+    const raw = clock.raw();
+    if (
+      b &&
+      Number.isFinite(b.tPlusSec) &&
+      (b.source === "coast" || b.source === "hold" || b.source === "stale") &&
+      (b.dir === "countdown" || b.tPlusSec < 0 || raw?.dir === "countdown")
+    ) {
+      const silenceS = ((atWall - (raw?.asOfWallMs ?? atWall)) / 1000).toFixed(0);
+      const { liftoffWall, via } = liftoffFallbackAnchor(raw);
+      const untilLoft =
+        liftoffWall != null
+          ? ` · liftoff-${via} in ${((liftoffWall - atWall) / 1000).toFixed(0)}s`
+          : "";
+      logInfo(
+        `clock ${formatMissionClock(b.tPlusSec)} (${b.source}, OCR lost ${silenceS}s` +
+          `${b.dir ? `/${b.dir}` : ""}${untilLoft})`,
+      );
+      return;
+    }
+    logInfo("clock — (no HUD / OCR miss)");
+  }
+
   /**
    * Hybrid liftoff: if we locked a countdown and the HUD then disappeared,
    * fire liftoff from OCR-extrapolated liftoff wall (or LL2 NET when live).
    * Does not invent the rest of the timeline.
    */
   async function maybeEmitLiftoffFallback(ocrSnap = {}) {
-    if (emitted.has("liftoff")) return;
+    if (emitted.has("liftoff") || liftoffFallbackGaveUp) return;
     const row = script.find((r) => r?.actionId === "liftoff");
     if (!row) return;
 
@@ -774,29 +816,42 @@ async function main() {
     // Still receiving clocks (or just lost) — let normal coast/emit handle it
     if (silenceMs < 15_000) return;
 
-    /** @type {number|null} */
-    let liftoffWall = null;
-    let via = null;
-    if (raw.liftoffWallMs != null && Number.isFinite(raw.liftoffWallMs)) {
-      liftoffWall = raw.liftoffWallMs;
-      via = "ocr-extrapolated";
-    }
-    if (
-      liftoffWall == null &&
-      !fileMode &&
-      scriptDoc.launchApproxUtc
-    ) {
-      const net = Date.parse(String(scriptDoc.launchApproxUtc));
-      if (Number.isFinite(net)) {
-        liftoffWall = net;
-        via = "ll2-net";
+    const { liftoffWall, via } = liftoffFallbackAnchor(raw);
+    if (liftoffWall == null) {
+      // Had countdown, HUD gone, no anchor to guess T+0
+      if (silenceMs > 60_000) {
+        liftoffFallbackGaveUp = true;
+        logWarn(
+          `liftoff fallback give-up: countdown locked then OCR lost ${Math.round(silenceMs / 1000)}s, ` +
+            `no ocr-extrapolated/LL2 NET anchor`,
+        );
+        archive?.appendEvent("liftoff_fallback_giveup", {
+          reason: "no_anchor",
+          silenceMs,
+        });
       }
+      return;
     }
-    if (liftoffWall == null) return;
 
-    // Not yet / too late (same ±120s catch-up spirit as emitDueMilestones)
+    // Not yet — still waiting for extrapolated T+0
     if (wall < liftoffWall - 500) return;
-    if (wall > liftoffWall + 120_000) return;
+
+    // Too late (same ±120s catch-up spirit as emitDueMilestones)
+    if (wall > liftoffWall + 120_000) {
+      liftoffFallbackGaveUp = true;
+      logWarn(
+        `liftoff fallback give-up: past ${via} T+0 by ${Math.round((wall - liftoffWall) / 1000)}s ` +
+          `with no emit (OCR lost ${Math.round(silenceMs / 1000)}s)`,
+      );
+      archive?.appendEvent("liftoff_fallback_giveup", {
+        reason: "too_late",
+        via,
+        silenceMs,
+        liftoffWallMs: liftoffWall,
+        lateByMs: wall - liftoffWall,
+      });
+      return;
+    }
 
     const belief = {
       tPlusSec: (wall - liftoffWall) / 1000,
@@ -1020,10 +1075,10 @@ async function main() {
             `clock — (bare ${ocr.raw || ocr.unsignedSec}s, waiting for motion lock)`,
           );
         } else {
-          logInfo("clock — (no HUD / OCR miss)");
+          logClockMiss(grabWall);
         }
       } else {
-        logInfo("clock — (no HUD / OCR miss)");
+        logClockMiss(grabWall);
       }
 
       // 4) Catch-up at grabWall — do NOT coast by OCR duration (that was
