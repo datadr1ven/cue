@@ -311,19 +311,29 @@ function ensurePlannerCron() {
   const marker = "TPLUS_SCHEDULE_DAILY";
   const planner =
     `0 6 * * * cd ${REPO} && /usr/bin/npm run schedule:tplus -w tplus -- --apply-crontab >> ${SCHED_LOG} 2>&1 # ${marker}`;
-  if (current.includes(marker)) {
+  // Already correct for this checkout — leave alone
+  if (current.includes(planner)) {
     return;
   }
-  // Drop a prior unmarked planner line if present
+  // Drop any prior planner line (wrong REPO path, unmarked, etc.) then install
   const cleaned = current
     .split("\n")
-    .filter((l) => !l.includes("npm run schedule:tplus -w tplus -- --apply-crontab"))
+    .filter(
+      (l) =>
+        !l.includes(marker) &&
+        !l.includes("npm run schedule:tplus -w tplus -- --apply-crontab") &&
+        !l.includes("TPlus daily LL2"),
+    )
     .join("\n");
   const next =
     cleaned.replace(/\n+$/, "\n") +
     `\n# TPlus daily LL2 → crontab refresh (06:00 local · ~1 LL2 req/day)\n${planner}\n`;
   writeCrontab(next);
-  console.log("installed daily planner cron (06:00 local)");
+  console.log(
+    current.includes(marker)
+      ? `updated daily planner cron → cd ${REPO}`
+      : "installed daily planner cron (06:00 local)",
+  );
 }
 
 main().catch((e) => {
