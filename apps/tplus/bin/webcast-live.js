@@ -419,8 +419,10 @@ function createClockBelief() {
     /** True once we have a signed mission clock (explicit T± or motion-locked). */
     hasLock: () => Boolean(belief && Number.isFinite(belief.tPlusSec)),
     /**
-     * Coast from last OCR grab-time. Window must cover OCR + ASR + precision
-     * sleep (was 12s — ASR alone often exceeded that and froze coast → missed wakes).
+     * Coast from last OCR grab-time.
+     * Normal: ~60s (covers whisper + sleep-to-milestone).
+     * Countdown after HUD drop (NASA+ etc.): keep coasting longer so we can
+     * still reach T+0 when the clock vanishes ~T−1–2m (hybrid fallback).
      */
     now(wallMs = Date.now()) {
       if (!belief) return null;
@@ -429,8 +431,12 @@ function createClockBelief() {
         // hold: freeze at last OCR
         return { ...belief, source: "hold", ageMs: age };
       }
-      // ~1 minute: enough for whisper + sleep-to-milestone between OCR samples
-      if (age < 60_000 && (belief.source === "ocr" || belief.source === "coast")) {
+      const countingDown =
+        belief.dir === "countdown" ||
+        (Number.isFinite(belief.tPlusSec) && belief.tPlusSec < 0);
+      // HUD often drops ~T−1–2m (NASA+); keep coasting so T+0 is reachable.
+      const coastLimitMs = countingDown ? 240_000 : 60_000;
+      if (age < coastLimitMs && (belief.source === "ocr" || belief.source === "coast")) {
         const coast = belief.tPlusSec + age / 1000;
         return {
           ...belief,
@@ -747,6 +753,75 @@ async function main() {
   }
 
   /**
+   * Hybrid liftoff: if we locked a countdown and the HUD then disappeared,
+   * fire liftoff from OCR-extrapolated liftoff wall (or LL2 NET when live).
+   * Does not invent the rest of the timeline.
+   */
+  async function maybeEmitLiftoffFallback(ocrSnap = {}) {
+    if (emitted.has("liftoff")) return;
+    const row = script.find((r) => r?.actionId === "liftoff");
+    if (!row) return;
+
+    const raw = clock.raw();
+    if (!raw || !Number.isFinite(raw.tPlusSec)) return;
+    const wasCountdown =
+      raw.dir === "countdown" || raw.tPlusSec < 0;
+    if (!wasCountdown) return;
+    if ((raw.stallMs || 0) >= 8000) return; // hold — don't guess liftoff
+
+    const wall = Date.now();
+    const silenceMs = wall - raw.asOfWallMs;
+    // Still receiving clocks (or just lost) — let normal coast/emit handle it
+    if (silenceMs < 15_000) return;
+
+    /** @type {number|null} */
+    let liftoffWall = null;
+    let via = null;
+    if (raw.liftoffWallMs != null && Number.isFinite(raw.liftoffWallMs)) {
+      liftoffWall = raw.liftoffWallMs;
+      via = "ocr-extrapolated";
+    }
+    if (
+      liftoffWall == null &&
+      !fileMode &&
+      scriptDoc.launchApproxUtc
+    ) {
+      const net = Date.parse(String(scriptDoc.launchApproxUtc));
+      if (Number.isFinite(net)) {
+        liftoffWall = net;
+        via = "ll2-net";
+      }
+    }
+    if (liftoffWall == null) return;
+
+    // Not yet / too late (same ±120s catch-up spirit as emitDueMilestones)
+    if (wall < liftoffWall - 500) return;
+    if (wall > liftoffWall + 120_000) return;
+
+    const belief = {
+      tPlusSec: (wall - liftoffWall) / 1000,
+      asOfWallMs: wall,
+      source: "net_fallback",
+      stallMs: 0,
+      liftoffWallMs: liftoffWall,
+      confidence: 0.55,
+      dir: "countup",
+    };
+    const ssNow = fileMode ? fileSsForMissionTPlus(0) : null;
+    logInfo(
+      `liftoff via ${via} fallback (HUD lost after countdown lock, ` +
+        `silence=${(silenceMs / 1000).toFixed(0)}s)`,
+    );
+    archive?.appendEvent("liftoff_fallback", {
+      via,
+      silenceMs,
+      liftoffWallMs: liftoffWall,
+      wallMs: wall,
+    });
+    await emitRow(row, belief, ssNow, ocrSnap);
+  }
+
+  /**
    * Emit one milestone with a still grabbed at *this* wall/file time.
    * @param {object} row
    * @param {object} belief
@@ -820,7 +895,7 @@ async function main() {
       evidence: {
         sources: [
           "schedule",
-          "ocr_clock",
+          belief.source === "net_fallback" ? "net_fallback" : "ocr_clock",
           ...(asrHits.length ? ["asr"] : []),
           ...(scroller.length ? ["hud_scroller"] : []),
         ],
@@ -954,6 +1029,8 @@ async function main() {
       // 4) Catch-up at grabWall — do NOT coast by OCR duration (that was
       //    reporting T+0:07 for a T+0:00 frame and seeking wall-late).
       await emitDueMilestones("catch-up", ocr, { atWall: grabWall });
+      // 4b) Countdown HUD gone → liftoff from OCR-extrapolated / LL2 NET wall
+      await maybeEmitLiftoffFallback(ocr);
 
       // 5) Sleep plan BEFORE ASR — whisper was eating the precision window.
       let sleepSec = args.ocrEverySec;
@@ -972,6 +1049,17 @@ async function main() {
               `next ${nextForSleep.row.actionId} in ${nextForSleep.until.toFixed(2)}s ` +
                 `(script ${formatMissionClock(nextForSleep.row.tPlusSec)}) — precision wake`,
             );
+          }
+        }
+      }
+      // If HUD is gone but liftoff still pending, sleep toward extrapolated T+0
+      if (!emitted.has("liftoff") && beliefForSleep?.dir === "countdown") {
+        const raw = clock.raw();
+        const loft = raw?.liftoffWallMs;
+        if (loft != null && Number.isFinite(loft)) {
+          const untilLoft = (loft - Date.now()) / 1000;
+          if (untilLoft > 0.05 && untilLoft < 180) {
+            sleepSec = Math.min(sleepSec, Math.max(0.05, untilLoft));
           }
         }
       }
