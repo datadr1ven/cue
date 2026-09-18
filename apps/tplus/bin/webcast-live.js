@@ -298,40 +298,126 @@ function formatMissionClock(tPlusSec) {
   return `T${sign}${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** Hold-aware clock belief */
+/**
+ * Hold-aware clock belief.
+ * SpaceX HUDs deliver signed T± via OCR. NASA+/bare HH:MM:SS deliver magnitude
+ * only — we lock direction from motion (countdown→T−, countup→T+) after a few
+ * agreeing samples before coast/emit.
+ */
 function createClockBelief() {
-  /** @type {{ tPlusSec: number, asOfWallMs: number, source: string, stallMs: number, liftoffWallMs: number|null, confidence: number }|null} */
+  /** @type {{ tPlusSec: number, asOfWallMs: number, source: string, stallMs: number, liftoffWallMs: number|null, confidence: number, dir?: string }|null} */
   let belief = null;
-  let lastOcr = null;
+  /** @type {{ magSec: number, wallMs: number, signed: boolean }|null} */
+  let lastSample = null;
+  /** @type {"countdown"|"countup"|null} */
+  let dir = null;
+  let dirVotes = 0; // consecutive agreeing motion samples toward dir lock
+  const DIR_VOTES_NEEDED = 2;
+
+  function commitSigned(tPlusSec, wallMs, stallMs, confidence, source = "ocr") {
+    belief = {
+      tPlusSec,
+      asOfWallMs: wallMs,
+      source,
+      stallMs,
+      liftoffWallMs: wallMs - tPlusSec * 1000,
+      confidence,
+      dir: dir || (tPlusSec < 0 ? "countdown" : "countup"),
+    };
+    return belief;
+  }
 
   return {
-    updateFromOcr(clockSec, wallMs = Date.now()) {
-      if (clockSec == null || !Number.isFinite(clockSec)) return belief;
-      if (lastOcr && Math.abs(clockSec - lastOcr.clockSec) < 0.5) {
-        // stalled HUD (hold)
-        const stallMs = wallMs - lastOcr.wallMs;
-        belief = {
-          tPlusSec: clockSec,
-          asOfWallMs: wallMs,
-          source: "ocr",
-          stallMs,
-          liftoffWallMs:
-            belief?.liftoffWallMs ?? wallMs - clockSec * 1000,
-          confidence: 0.85,
-        };
-      } else {
-        belief = {
-          tPlusSec: clockSec,
-          asOfWallMs: wallMs,
-          source: "ocr",
-          stallMs: 0,
-          liftoffWallMs: wallMs - clockSec * 1000,
-          confidence: 0.9,
-        };
+    /**
+     * @param {number|null|undefined} clockSec signed T± seconds, or null
+     * @param {number} [wallMs]
+     * @param {{ unsignedSec?: number|null, signSource?: string|null }} [opts]
+     */
+    updateFromOcr(clockSec, wallMs = Date.now(), opts = {}) {
+      const unsigned =
+        opts.unsignedSec != null && Number.isFinite(opts.unsignedSec)
+          ? Number(opts.unsignedSec)
+          : null;
+
+      // Explicit T± — lock direction immediately
+      if (clockSec != null && Number.isFinite(clockSec)) {
+        dir = clockSec < 0 ? "countdown" : "countup";
+        dirVotes = DIR_VOTES_NEEDED;
+        const stall =
+          lastSample && Math.abs(Math.abs(clockSec) - lastSample.magSec) < 0.5
+            ? wallMs - lastSample.wallMs
+            : 0;
+        lastSample = { magSec: Math.abs(clockSec), wallMs, signed: true };
+        return commitSigned(clockSec, wallMs, stall, stall > 0 ? 0.85 : 0.9);
       }
-      lastOcr = { clockSec, wallMs };
-      return belief;
+
+      // Bare magnitude — need motion to infer sign
+      if (unsigned == null) return belief;
+
+      if (!lastSample) {
+        lastSample = { magSec: unsigned, wallMs, signed: false };
+        return belief; // no dir yet
+      }
+
+      const prevMag = lastSample.magSec;
+      const dMag = unsigned - prevMag;
+      const dWall = (wallMs - lastSample.wallMs) / 1000;
+
+      // Hold / noise
+      if (Math.abs(dMag) < 0.5) {
+        lastSample = { magSec: unsigned, wallMs, signed: false };
+        if (belief && dir) {
+          belief = {
+            ...belief,
+            stallMs: (belief.stallMs || 0) + Math.max(0, dWall) * 1000,
+            asOfWallMs: wallMs,
+            tPlusSec: (dir === "countdown" ? -1 : 1) * unsigned,
+          };
+        }
+        return belief;
+      }
+
+      // Reject OCR jumps (≫ wall elapsed)
+      if (dWall > 0.2 && Math.abs(dMag) > Math.max(8, 3 * dWall)) {
+        return belief; // keep lastSample
+      }
+
+      lastSample = { magSec: unsigned, wallMs, signed: false };
+
+      // Motion vote
+      let vote = null;
+      if (dWall > 0.2) {
+        if (dMag < -0.5) vote = "countdown";
+        else if (dMag > 0.5) vote = "countup";
+      }
+      // Near-zero flip: was counting down through liftoff
+      if (
+        dir === "countdown" &&
+        vote === "countup" &&
+        unsigned < 30 &&
+        prevMag < 60
+      ) {
+        dir = "countup";
+        dirVotes = DIR_VOTES_NEEDED;
+      } else if (vote) {
+        if (vote === dir) dirVotes += 1;
+        else if (!dir) {
+          dir = vote;
+          dirVotes = 1;
+        } else {
+          // conflicting — require re-agree
+          dir = vote;
+          dirVotes = 1;
+        }
+      }
+
+      if (!dir || dirVotes < DIR_VOTES_NEEDED) return belief;
+
+      const sign = dir === "countdown" ? -1 : 1;
+      return commitSigned(sign * unsigned, wallMs, 0, 0.8, "ocr");
     },
+    /** True once we have a signed mission clock (explicit T± or motion-locked). */
+    hasLock: () => Boolean(belief && Number.isFinite(belief.tPlusSec)),
     /**
      * Coast from last OCR grab-time. Window must cover OCR + ASR + precision
      * sleep (was 12s — ASR alone often exceeded that and froze coast → missed wakes).
@@ -829,24 +915,37 @@ async function main() {
           `slow frame+ocr ${grabMs}ms (fileSs=${ssGrab != null ? ssGrab.toFixed(1) : "live"})`,
         );
       }
-      if (ocr.ok && ocr.clockSec != null) {
-        const b = clock.updateFromOcr(ocr.clockSec, grabWall);
-        const stall =
-          b.stallMs > 8000 ? ` HOLD~${(b.stallMs / 1000).toFixed(0)}s` : "";
-        logInfo(`clock ${formatMissionClock(b.tPlusSec)} (${b.source})${stall}`);
-        if (!firstOcrNotified) {
-          firstOcrNotified = true;
-          await notifyAdmins(
-            `TPlus webcast OCR lock\n` +
-              `${scriptDoc.missionName || scriptDoc.missionId}\n` +
-              `clock ${formatMissionClock(b.tPlusSec)} (${b.source})\n` +
-              `frame+ocr ${grabMs}ms`,
+      if (ocr.ok && (ocr.clockSec != null || ocr.unsignedSec != null)) {
+        const b = clock.updateFromOcr(ocr.clockSec, grabWall, {
+          unsignedSec: ocr.unsignedSec,
+          signSource: ocr.signSource,
+        });
+        if (b && clock.hasLock()) {
+          const stall =
+            b.stallMs > 8000 ? ` HOLD~${(b.stallMs / 1000).toFixed(0)}s` : "";
+          logInfo(`clock ${formatMissionClock(b.tPlusSec)} (${b.source})${stall}`);
+          if (!firstOcrNotified) {
+            firstOcrNotified = true;
+            await notifyAdmins(
+              `TPlus webcast OCR lock\n` +
+                `${scriptDoc.missionName || scriptDoc.missionId}\n` +
+                `clock ${formatMissionClock(b.tPlusSec)} (${b.source}` +
+                `${b.dir ? `/${b.dir}` : ""})\n` +
+                `frame+ocr ${grabMs}ms`,
+            );
+            archive?.appendEvent("health_first_ocr", {
+              clockSec: b.tPlusSec,
+              source: b.source,
+              dir: b.dir || null,
+              grabMs,
+            });
+          }
+        } else if (ocr.unsignedSec != null) {
+          logInfo(
+            `clock — (bare ${ocr.raw || ocr.unsignedSec}s, waiting for motion lock)`,
           );
-          archive?.appendEvent("health_first_ocr", {
-            clockSec: b.tPlusSec,
-            source: b.source,
-            grabMs,
-          });
+        } else {
+          logInfo("clock — (no HUD / OCR miss)");
         }
       } else {
         logInfo("clock — (no HUD / OCR miss)");

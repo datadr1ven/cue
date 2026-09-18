@@ -32,6 +32,7 @@
     "webcast:schedule": "npm run webcast:schedule -w tplus --",
     "webcast:live": "npm run webcast:live -w tplus --",
     "webcast:listen": "npm run webcast:listen -w tplus --",
+    "schedule:tplus": "npm run schedule:tplus -w tplus --",
     "smoke:webcast": "npm run smoke:webcast -w tplus",
     "validate:missions": "npm run validate:missions -w tplus --",
     "smoke:tplus": "npm run smoke -w tplus",

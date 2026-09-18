@@ -37,6 +37,8 @@ CLOCK_RE = re.compile(
     r"T\s*([+\-−])\s*(\d{1,2}):(\d{2}):(\d{2})",
     re.IGNORECASE,
 )
+# NASA+/Roscosmos-style countdown without T± (e.g. "00:04:11")
+BARE_CLOCK_RE = re.compile(r"\b(\d{1,2}):(\d{2}):(\d{2})\b")
 EVENT_HINTS = re.compile(
     r"\b(MAX\s*Q|MAXQ|MECO|BECO|STAGE\s*SEP|HOT\s*STAG|ENTRY\s*BURN|"
     r"LANDING\s*BURN|LIFTOFF|LIFT\s*OFF|FAIRING|SECO)\b",
@@ -44,22 +46,78 @@ EVENT_HINTS = re.compile(
 )
 
 
+def _hms_to_sec(h: str, m: str, s: str) -> int:
+    return int(h) * 3600 + int(m) * 60 + int(s)
+
+
 def parse_clock_texts(texts: list[str]) -> tuple[int | None, str | None]:
-    """Return (signed_seconds, raw_match) from OCR text lines."""
+    """Return (signed_seconds, raw_match) — signed T± only (legacy)."""
+    info = parse_clock_info(texts)
+    return info["clockSec"], info["raw"]
+
+
+def parse_clock_info(texts: list[str]) -> dict:
+    """
+    Parse mission clock from OCR lines.
+
+    Prefer explicit T±HH:MM:SS (SpaceX). Fall back to bare HH:MM:SS (NASA+)
+    as unsigned magnitude — caller infers sign from motion.
+
+    Returns dict:
+      clockSec: signed seconds if T± present, else None
+      unsignedSec: |clock| magnitude when any clock found
+      raw: matched string
+      signSource: "signed" | "bare" | None
+    """
     joined = " ".join(texts)
     m = CLOCK_RE.search(joined)
     if not m:
-        # T+ and HH:MM:SS sometimes arrive as adjacent boxes
         compact = re.sub(r"\s+", "", joined.upper())
         m2 = re.search(r"T([+\-−])(\d{1,2}):(\d{2}):(\d{2})", compact)
-        if not m2:
-            return None, None
-        sign = -1 if m2.group(1) in "-−" else 1
-        sec = int(m2.group(2)) * 3600 + int(m2.group(3)) * 60 + int(m2.group(4))
-        return sign * sec, m2.group(0)
-    sign = -1 if m.group(1) in "-−" else 1
-    sec = int(m.group(2)) * 3600 + int(m.group(3)) * 60 + int(m.group(4))
-    return sign * sec, m.group(0)
+        if m2:
+            sign = -1 if m2.group(1) in "-−" else 1
+            sec = _hms_to_sec(m2.group(2), m2.group(3), m2.group(4))
+            signed = sign * sec
+            return {
+                "clockSec": signed,
+                "unsignedSec": sec,
+                "raw": m2.group(0),
+                "signSource": "signed",
+            }
+    else:
+        sign = -1 if m.group(1) in "-−" else 1
+        sec = _hms_to_sec(m.group(2), m.group(3), m.group(4))
+        signed = sign * sec
+        return {
+            "clockSec": signed,
+            "unsignedSec": sec,
+            "raw": m.group(0),
+            "signSource": "signed",
+        }
+
+    # Bare HH:MM:SS — pick the first plausible countdown/mission clock
+    # (reject silly values like 99:99:99 via regex digit bounds already)
+    for bm in BARE_CLOCK_RE.finditer(joined):
+        h, mi, s = bm.group(1), bm.group(2), bm.group(3)
+        if int(mi) > 59 or int(s) > 59:
+            continue
+        sec = _hms_to_sec(h, mi, s)
+        # Ignore near-zero noise and multi-day absurdities
+        if sec <= 0 or sec > 48 * 3600:
+            continue
+        return {
+            "clockSec": None,
+            "unsignedSec": sec,
+            "raw": bm.group(0),
+            "signSource": "bare",
+        }
+
+    return {
+        "clockSec": None,
+        "unsignedSec": None,
+        "raw": None,
+        "signSource": None,
+    }
 
 
 def format_signed(sec: int | None) -> str:
@@ -269,7 +327,7 @@ def main() -> int:
                         "conf": float(row[2]) if row[2] is not None else None,
                     }
                 )
-        clock_sec, raw = parse_clock_texts(texts)
+        info = parse_clock_info(texts)
         # Falcon arc "at present": labels near bottom-center horizontal mid
         present = [
             b
@@ -281,8 +339,10 @@ def main() -> int:
             json_mod.dumps(
                 {
                     "ok": True,
-                    "clockSec": clock_sec,
-                    "raw": raw,
+                    "clockSec": info["clockSec"],
+                    "unsignedSec": info["unsignedSec"],
+                    "signSource": info["signSource"],
+                    "raw": info["raw"],
                     "texts": texts,
                     "boxes": boxes,
                     "scrollerPresent": present[:8],
@@ -372,40 +432,59 @@ def main() -> int:
                 img_rel = dest.name  # report sits in keep_dir
 
             texts = ocr_frame(ocr, frame, scale=args.scale)
-            clock_sec, raw = parse_clock_texts(texts)
+            info = parse_clock_info(texts)
+            clock_sec = info["clockSec"]
+            raw = info["raw"]
+            # Display: signed if known, else bare magnitude as |T?|
+            display_sec = clock_sec
+            if display_sec is None and info["unsignedSec"] is not None:
+                display_sec = info["unsignedSec"]  # magnitude only; format as T+
             events = sorted(
                 {m.group(0).upper() for m in EVENT_HINTS.finditer(" ".join(texts))}
             )
 
             d_file = "" if prev_file is None else f"{t - prev_file:+.0f}"
             d_ocr = ""
-            if clock_sec is not None and prev_ocr is not None:
-                d_ocr = f"{clock_sec - prev_ocr:+d}"
-            if clock_sec is not None:
+            track = clock_sec if clock_sec is not None else info["unsignedSec"]
+            if track is not None and prev_ocr is not None:
+                d_ocr = f"{track - prev_ocr:+d}"
+            if track is not None:
                 hits += 1
-                prev_ocr = clock_sec
-                # mission_tplus = file_t - liftoff_file  ⇒  liftoff_file = file_t - clock_sec
-                lock_samples.append(
-                    {
-                        "fileSec": t,
-                        "clockSec": clock_sec,
-                        "liftoffFileSec": t - clock_sec,
-                        "raw": raw,
-                    }
-                )
+                prev_ocr = track
+                if clock_sec is not None:
+                    # mission_tplus = file_t - liftoff_file  ⇒  liftoff_file = file_t - clock_sec
+                    lock_samples.append(
+                        {
+                            "fileSec": t,
+                            "clockSec": clock_sec,
+                            "liftoffFileSec": t - clock_sec,
+                            "raw": raw,
+                        }
+                    )
             prev_file = t
 
+            bare_tag = (
+                f" bare={info['unsignedSec']}"
+                if info["signSource"] == "bare"
+                else ""
+            )
+            clock_col = (
+                format_signed(clock_sec)
+                if clock_sec is not None
+                else (f"bare {raw}" if info["unsignedSec"] is not None else "—")
+            )
             log(
-                f"{t:8.0f}  {format_signed(clock_sec):12}  {d_file:>6}  {d_ocr:>6}  "
-                f"{','.join(events) or '—'}  {raw or ''}"
+                f"{t:8.0f}  {clock_col:12}  "
+                f"{d_file:>6}  {d_ocr:>6}  "
+                f"{','.join(events) or '—'}  {raw or ''}{bare_tag}"
             )
 
             if want_html:
                 report_rows.append(
                     {
                         "file_t": t,
-                        "clock": format_signed(clock_sec),
-                        "clock_sec": clock_sec,
+                        "clock": clock_col,
+                        "clock_sec": clock_sec if clock_sec is not None else info["unsignedSec"],
                         "d_file": d_file,
                         "d_ocr": d_ocr,
                         "events": ",".join(events) or "—",

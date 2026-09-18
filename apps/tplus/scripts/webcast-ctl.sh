@@ -88,6 +88,24 @@ resolve_start() {
   usage
 }
 
+# Pre-start LL2 gate: refresh crontab on slip/cancel; only spawn when "go".
+# Exit 0 from check = go; 75 = slip; 76 = cancel (see schedule-from-ll2.js).
+check_start_ll2() {
+  local id="$1"
+  local ec
+  set +e
+  (cd "$CUE_ROOT" && node apps/tplus/bin/schedule-from-ll2.js --check-start "$id")
+  ec=$?
+  set -e
+  return "$ec"
+}
+
+apply_schedule() {
+  echo "[$RUN_KEY] refreshing schedule (LL2 → crontab)…"
+  (cd "$CUE_ROOT" && node apps/tplus/bin/schedule-from-ll2.js --apply-crontab) || \
+    echo "[$RUN_KEY] WARN: --apply-crontab failed" >&2
+}
+
 cmd_start() {
   resolve_start "$@"
   local pf lf
@@ -101,6 +119,34 @@ cmd_start() {
 
   echo "=== START webcast $RUN_KEY ($(date -Is)) mode=$MODE args=${LIVE_ARGS[*]} ==="
   echo "log → $lf"
+
+  # If starting by LL2 id, recheck NET/window before parking on a stale cron.
+  local ll2_id=""
+  local i=0
+  for ((i = 0; i < ${#LIVE_ARGS[@]}; i++)); do
+    if [[ "${LIVE_ARGS[$i]}" == "--ll2-id" ]]; then
+      ll2_id="${LIVE_ARGS[$((i + 1))]:-}"
+      break
+    fi
+  done
+  if [[ -n "$ll2_id" ]]; then
+    local ec=0
+    set +e
+    check_start_ll2 "$ll2_id"
+    ec=$?
+    set -e
+    if [[ "$ec" -eq 75 || "$ec" -eq 76 ]]; then
+      echo "[$RUN_KEY] check-start deferred (ec=$ec) — not spawning webcast:live"
+      apply_schedule
+      echo "=== START deferred $RUN_KEY ==="
+      return 0
+    fi
+    if [[ "$ec" -ne 0 ]]; then
+      echo "[$RUN_KEY] check-start failed ec=$ec — refusing start" >&2
+      return 1
+    fi
+  fi
+
   # Quote-safe: rebuild command string
   local args_q=""
   local x

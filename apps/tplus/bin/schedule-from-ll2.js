@@ -43,13 +43,36 @@ const SKIP_STATUS = new Set([
   "TBD", // often month-level placeholder
 ]);
 
+/** Terminal / do-not-webcast statuses for --check-start */
+const CANCEL_STATUS = new Set([
+  ...SKIP_STATUS,
+  "Cancelled",
+  "Canceled",
+  "Withdrawn",
+  "Abandoned",
+]);
+
+/** Extra minutes beyond LEAD_MIN before we call a start "too early" vs new NET */
+const CHECK_SLACK_MIN = 10;
+
+/** Exit codes for --check-start (webcast-ctl.sh) */
+export const CHECK_GO = 0;
+export const CHECK_SLIP = 75; // NET moved later — reschedule, do not start
+export const CHECK_CANCEL = 76; // scrubbed / done / past window — refresh, do not start
+
 function parseArgs(argv) {
-  const out = { apply: false, dryRun: false, horizonH: HORIZON_H };
+  const out = {
+    apply: false,
+    dryRun: false,
+    horizonH: HORIZON_H,
+    checkStartId: null,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--apply-crontab") out.apply = true;
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--horizon-h") out.horizonH = Number(argv[++i]);
+    else if (a === "--check-start") out.checkStartId = argv[++i];
     else if (a === "--help" || a === "-h") out.help = true;
   }
   return out;
@@ -227,14 +250,109 @@ function writeCrontab(content) {
   execFileSync("crontab", ["-"], { input: content, encoding: "utf8" });
 }
 
+/**
+ * Pre-start gate for webcast-ctl: fresh LL2 NET/window/status.
+ * @param {string} ll2Id
+ * @returns {Promise<{ code: number, action: string, reason: string, launch?: object }>}
+ */
+async function checkStart(ll2Id) {
+  const launch = await ll2Fetch(`/launch/${encodeURIComponent(ll2Id)}/`);
+  const status = launch.status?.abbrev || launch.status?.name || "";
+  const netStr = launch.net || launch.window_start;
+  const net = netStr ? new Date(netStr) : null;
+  const windowEnd = new Date(launch.window_end || netStr || 0);
+  const now = new Date();
+  const name = launch.name || ll2Id;
+
+  if (CANCEL_STATUS.has(status)) {
+    return {
+      code: CHECK_CANCEL,
+      action: "cancel",
+      reason: `status=${status}`,
+      launch,
+      name,
+      net: net?.toISOString() || null,
+      windowEnd: windowEnd.toISOString(),
+    };
+  }
+  if (!net || Number.isNaN(net.getTime())) {
+    return {
+      code: CHECK_CANCEL,
+      action: "cancel",
+      reason: "no net",
+      launch,
+      name,
+    };
+  }
+  // Window closed more than an hour ago
+  if (windowEnd.getTime() < now.getTime() - 60 * 60 * 1000) {
+    return {
+      code: CHECK_CANCEL,
+      action: "cancel",
+      reason: "window ended",
+      launch,
+      name,
+      net: net.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+    };
+  }
+  // Start cron fired but NET slipped later — still more than lead+slack away
+  const msUntilNet = net.getTime() - now.getTime();
+  const tooEarlyMs = (LEAD_MIN + CHECK_SLACK_MIN) * 60 * 1000;
+  if (msUntilNet > tooEarlyMs) {
+    return {
+      code: CHECK_SLIP,
+      action: "slip",
+      reason: `NET in ${Math.round(msUntilNet / 60000)}m (need ≤${LEAD_MIN + CHECK_SLACK_MIN}m)`,
+      launch,
+      name,
+      net: net.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+    };
+  }
+  return {
+    code: CHECK_GO,
+    action: "go",
+    reason: "imminent or in window",
+    launch,
+    name,
+    net: net.toISOString(),
+    windowEnd: windowEnd.toISOString(),
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log(`Usage: schedule-from-ll2 [--apply-crontab] [--dry-run] [--horizon-h N]`);
+    console.log(
+      `Usage: schedule-from-ll2 [--apply-crontab] [--dry-run] [--horizon-h N]
+       schedule-from-ll2 --check-start <ll2-uuid>`,
+    );
     process.exit(0);
   }
 
   mkdirSync(join(OUT_DIR, "logs"), { recursive: true });
+
+  if (args.checkStartId) {
+    const r = await checkStart(args.checkStartId);
+    console.log(
+      JSON.stringify(
+        {
+          action: r.action,
+          reason: r.reason,
+          name: r.name,
+          net: r.net || null,
+          windowEnd: r.windowEnd || null,
+        },
+        null,
+        0,
+      ),
+    );
+    console.error(
+      `check-start ${r.action}: ${r.name || args.checkStartId} — ${r.reason}`,
+    );
+    process.exit(r.code);
+  }
 
   const now = new Date();
   console.log(
