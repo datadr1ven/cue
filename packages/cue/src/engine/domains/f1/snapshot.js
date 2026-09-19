@@ -492,6 +492,29 @@ export function reduceF1(state, event, opts = {}) {
 export const RACE_FINISH_WAIT_MS = 25_000;
 
 /**
+ * Arm deferred race/sprint finish board (CHEQUERED or SESSION FINISHED backup).
+ * @param {object} state
+ * @param {string|null} t
+ * @param {string} msg
+ * @param {string|null} priorTrackStatus
+ */
+function armPendingRaceFinish(state, t, msg, priorTrackStatus) {
+  if (state.pendingRaceFinish || state.raceFinishEmitted) return;
+  if (isPracticeMode(state) || isKnockoutMode(state)) return;
+  if (!(isRaceStyleMode(state) || state.sessionKind === "unknown")) return;
+  state.pendingRaceFinish = {
+    eventT: t || state.lastEventT,
+    wallMs: Date.now(),
+    msg,
+    type: "session.chequered",
+    severity: 9,
+    underSafetyCar: priorTrackStatus === "safety_car",
+    underVsc: priorTrackStatus === "vsc",
+    priorTrackStatus: priorTrackStatus || null,
+  };
+}
+
+/**
  * If a race finish is pending and we have lap order (or timed out), stage emit.
  * @param {object} state
  */
@@ -1320,6 +1343,32 @@ function applyRaceControl(state, p, t) {
     state.sessionActive = false;
   }
 
+  // SESSION FINISHED without CHEQUERED: OpenF1 sometimes delivers only one of
+  // the two race_control publishes per MQTT client (Spain 2026 live worker
+  // missed both flag+finished while a separate capture got them). Arm the
+  // same deferred race-finish board from FINISHED alone.
+  if (
+    msg.includes("SESSION FINISHED") &&
+    !msg.includes("CHEQUERED") &&
+    !(flag.includes("CHEQUERED")) &&
+    !state.chequered
+  ) {
+    const priorTrackStatus = state.trackStatus;
+    state.trackStatus = "chequered";
+    state.chequered = true;
+    state.sessionActive = false;
+    state.chequeredCount = (state.chequeredCount || 0) + 1;
+    state.endedSegment = state.segment || 1;
+    state.orderAtChequered = orderedField(state, 30);
+    state.awaitingNextSegment = true;
+    armPendingRaceFinish(
+      state,
+      t,
+      String(p.message || "SESSION FINISHED"),
+      priorTrackStatus,
+    );
+  }
+
   if (flag.includes("CHEQUERED") || msg.includes("CHEQUERED")) {
     // Capture neutralisation *before* overwriting trackStatus (Silverstone
     // '26 finished behind the safety car).
@@ -1333,23 +1382,12 @@ function applyRaceControl(state, p, t) {
     state.awaitingNextSegment = true;
 
     // Race/sprint: defer finish board until lap completions arrive (often ~1s later)
-    if (
-      !state.raceFinishEmitted &&
-      !isPracticeMode(state) &&
-      !isKnockoutMode(state) &&
-      (isRaceStyleMode(state) || state.sessionKind === "unknown")
-    ) {
-      state.pendingRaceFinish = {
-        eventT: t || state.lastEventT,
-        wallMs: Date.now(),
-        msg: String(p.message || "CHEQUERED FLAG"),
-        type: "session.chequered",
-        severity: 9,
-        underSafetyCar: priorTrackStatus === "safety_car",
-        underVsc: priorTrackStatus === "vsc",
-        priorTrackStatus: priorTrackStatus || null,
-      };
-    }
+    armPendingRaceFinish(
+      state,
+      t,
+      String(p.message || "CHEQUERED FLAG"),
+      priorTrackStatus,
+    );
 
     // Classify unknown sessions at first chequered
     if (!state.sessionKindForced && state.sessionKind === "unknown") {
@@ -1359,13 +1397,13 @@ function applyRaceControl(state, p, t) {
       if (startMs != null && endMs != null) {
         const mins = (endMs - startMs) / 60000;
         // Short pure green + few flying laps → Q segment
-        // Short green after lots of laps (red-flagged FP) → practice
-        // ~1h single block → practice; much longer → race
+        // Mid-length + modest laps → practice (FP)
+        // Long or high lap count → race (Spain GP ~94m/57 laps was mis-tagged practice)
         if (mins > 0 && mins <= 35 && laps < 50) {
           state.sessionKind = "qualifying";
-        } else if (mins > 0 && mins <= 100) {
+        } else if (mins > 0 && mins <= 100 && laps < 40) {
           state.sessionKind = "practice";
-        } else if (mins > 100) {
+        } else if (mins > 70 || laps >= 40) {
           state.sessionKind = "race";
         }
       } else if (laps >= 50) {
