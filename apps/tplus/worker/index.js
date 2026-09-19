@@ -513,7 +513,7 @@ function formatNextLaunch(schedule) {
     return (
       `No upcoming webcasts on the current plan.` +
       updated +
-      `\nThe desktop refreshes LL2 ~daily (and on scrub/slip).`
+      `\nThe plan updates about once a day (and when launch times slip).`
     );
   }
   const L = list[0];
@@ -588,8 +588,8 @@ function opsHelp() {
     `/inbox clear — wipe inbox\n` +
     `/reply last <text> — DM the last inbox user\n` +
     `/reply <userId|@user> <text> — DM that user\n` +
-    `(launch events: desktop webcast:live → POST /suggest)\n` +
-    `(schedule: desktop schedule-from-ll2 → POST /schedule-cache)\n` +
+    `(launch events: webcast:live → POST /suggest)\n` +
+    `(schedule: schedule-from-ll2 → POST /schedule-cache)\n` +
     `(new inbox messages ping admins; batched ~10m)`
   );
 }
