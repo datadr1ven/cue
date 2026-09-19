@@ -421,6 +421,54 @@ async function main() {
   if (args.apply && !args.dryRun) {
     ensurePlannerCron();
   }
+
+  // Push plan to CF Worker KV for /nextlaunch · /nextlaunches (best-effort)
+  if (!args.dryRun) {
+    await pushScheduleCache(schedule);
+  }
+}
+
+/**
+ * POST schedule snapshot to CF Worker (same auth as /suggest).
+ * URL: TPLUS_SCHEDULE_URL or derive from TPLUS_SUGGEST_URL (/suggest → /schedule-cache).
+ */
+async function pushScheduleCache(schedule) {
+  const secret =
+    process.env.TPLUS_SUGGEST_SECRET || process.env.SUGGEST_SECRET || "";
+  let url = process.env.TPLUS_SCHEDULE_URL || "";
+  if (!url) {
+    const suggest = process.env.TPLUS_SUGGEST_URL || "";
+    if (suggest.includes("/suggest")) {
+      url = suggest.replace(/\/suggest\/?$/, "/schedule-cache");
+    } else if (suggest) {
+      url = suggest.replace(/\/$/, "") + "/schedule-cache";
+    }
+  }
+  if (!url || !secret) {
+    console.log(
+      "skip schedule-cache push (set TPLUS_SUGGEST_URL + TPLUS_SUGGEST_SECRET)",
+    );
+    return;
+  }
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${secret}`,
+        "X-Suggest-Secret": secret,
+      },
+      body: JSON.stringify(schedule),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      console.warn(`schedule-cache push failed ${res.status}: ${text.slice(0, 200)}`);
+      return;
+    }
+    console.log(`schedule-cache pushed → ${url} (${text.slice(0, 120)})`);
+  } catch (e) {
+    console.warn(`schedule-cache push error: ${e.message || e}`);
+  }
 }
 
 function ensurePlannerCron() {

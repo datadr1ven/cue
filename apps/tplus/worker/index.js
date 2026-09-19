@@ -1,11 +1,12 @@
 /**
  * Cloudflare Worker — TPlus Telegram (enroll + deliver shell).
  *
- * Always-on: /start · /help · /status · /stop · inbox.
+ * Always-on: /start · /help · /nextlaunch · /nextlaunches · /status · /stop · inbox.
  * Admins: /note · /broadcast · /inbox · /reply · /subscribers
- * Launch events: laptop webcast:live → POST /suggest (test|ops).
+ * Launch events: desktop webcast:live → POST /suggest (test|ops).
+ * Schedule cache: desktop schedule-from-ll2 → POST /schedule-cache → KV.
  *
- * /suggest is mission-agnostic fan-out: the laptop owns LL2/script/OCR.
+ * /suggest is mission-agnostic fan-out: the desktop owns LL2/script/OCR.
  * Deploy this Worker for code changes only — not when missions change.
  *
  * Bindings (wrangler.toml):
@@ -42,6 +43,8 @@ import {
 } from "cue/telegram-inbox.js";
 
 const KV_USERS = "users:v1";
+/** Desktop schedule-from-ll2 snapshot for /nextlaunch(es) */
+const KV_SCHEDULE = "schedule:v1";
 
 /** Once per isolate — keep Telegram / menu in sync with TPLUS_USER_COMMANDS */
 let commandsRegistered = false;
@@ -448,11 +451,129 @@ function userHelp() {
     `TPlus — sparse launch alerts\n\n` +
     `High-signal milestones from the live webcast worker (test or ops mode).\n\n` +
     `/start — subscribe\n` +
+    `/nextlaunch — next planned webcast\n` +
+    `/nextlaunches — upcoming plan (from desktop schedule)\n` +
     `/status — am I subscribed?\n` +
     `/stop — unsubscribe\n` +
     `/help — this message\n\n` +
     `Unofficial; not affiliated with SpaceX or other LSPs.`
   );
+}
+
+/**
+ * @param {object|null} schedule
+ * @returns {object[]}
+ */
+function scheduleLaunches(schedule) {
+  const list = Array.isArray(schedule?.launches) ? schedule.launches : [];
+  const now = Date.now();
+  return list
+    .filter((L) => L && L.net && Date.parse(L.net) + 2 * 3600 * 1000 > now)
+    .sort((a, b) => String(a.net).localeCompare(String(b.net)));
+}
+
+function formatNetWhen(iso) {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return String(iso || "—");
+  const d = new Date(ms);
+  const utc = d.toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+  const delta = ms - Date.now();
+  if (delta < -3600_000) return utc;
+  if (delta < 0) return `${utc} (window open / NET passed)`;
+  const h = Math.floor(delta / 3600_000);
+  const m = Math.floor((delta % 3600_000) / 60_000);
+  const rel =
+    h >= 48
+      ? `in ~${Math.round(h / 24)}d`
+      : h >= 1
+        ? `in ${h}h ${m}m`
+        : `in ${m}m`;
+  return `${utc} (${rel})`;
+}
+
+/**
+ * @param {object} L
+ * @param {number} [i]
+ */
+function formatLaunchLine(L, i = null) {
+  const name = L.missionName || L.name || L.ll2Id || "Launch";
+  const lsp = L.lsp ? ` · ${L.lsp}` : "";
+  const prefix = i != null ? `${i}. ` : "";
+  const net = formatNetWhen(L.net);
+  const webcast = L.webcastUrl ? `\n   ${L.webcastUrl}` : "";
+  return `${prefix}${name}${lsp}\n   NET ${net}${webcast}`;
+}
+
+function formatNextLaunch(schedule) {
+  const list = scheduleLaunches(schedule);
+  if (!list.length) {
+    const updated = schedule?.generatedAt
+      ? `\n(plan updated ${schedule.generatedAt})`
+      : "";
+    return (
+      `No upcoming webcasts on the current plan.` +
+      updated +
+      `\nThe desktop refreshes LL2 ~daily (and on scrub/slip).`
+    );
+  }
+  const L = list[0];
+  const updated = schedule?.generatedAt
+    ? `\n\nPlan as of ${schedule.generatedAt}`
+    : "";
+  return `Next launch\n\n${formatLaunchLine(L)}${updated}`;
+}
+
+function formatNextLaunches(schedule, limit = 8) {
+  const list = scheduleLaunches(schedule).slice(0, limit);
+  if (!list.length) return formatNextLaunch(schedule);
+  const updated = schedule?.generatedAt
+    ? `\n\nPlan as of ${schedule.generatedAt} · horizon ${schedule.horizonH || "—"}h`
+    : "";
+  const body = list.map((L, i) => formatLaunchLine(L, i + 1)).join("\n\n");
+  return `Upcoming launches (${list.length})\n\n${body}${updated}`;
+}
+
+/**
+ * Desktop schedule-from-ll2 → cache for /nextlaunch(es).
+ * Auth: same Bearer as /suggest.
+ */
+async function handleScheduleCachePost(request, env, kv) {
+  if (!suggestSecretOk(env, request)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response("bad json", { status: 400 });
+  }
+  if (!body || typeof body !== "object") {
+    return new Response("need schedule object", { status: 400 });
+  }
+  const launches = Array.isArray(body.launches) ? body.launches : [];
+  const slim = {
+    generatedAt: body.generatedAt || new Date().toISOString(),
+    pushedAt: new Date().toISOString(),
+    horizonH: body.horizonH ?? null,
+    leadMin: body.leadMin ?? null,
+    trailMin: body.trailMin ?? null,
+    launches: launches.slice(0, 16).map((L) => ({
+      ll2Id: L.ll2Id || L.id || null,
+      name: L.name || null,
+      missionName: L.missionName || null,
+      lsp: L.lsp || null,
+      net: L.net || null,
+      windowEnd: L.windowEnd || null,
+      webcastUrl: L.webcastUrl || null,
+      status: L.status || null,
+    })),
+  };
+  await kvPutJson(kv, KV_SCHEDULE, slim);
+  return Response.json({
+    ok: true,
+    stored: slim.launches.length,
+    generatedAt: slim.generatedAt,
+  });
 }
 
 function opsHelp() {
@@ -467,7 +588,8 @@ function opsHelp() {
     `/inbox clear — wipe inbox\n` +
     `/reply last <text> — DM the last inbox user\n` +
     `/reply <userId|@user> <text> — DM that user\n` +
-    `(launch events: laptop webcast:live → POST /suggest)\n` +
+    `(launch events: desktop webcast:live → POST /suggest)\n` +
+    `(schedule: desktop schedule-from-ll2 → POST /schedule-cache)\n` +
     `(new inbox messages ping admins; batched ~10m)`
   );
 }
@@ -653,6 +775,22 @@ async function handleMessage(env, kv, message) {
     return;
   }
 
+  // List before singular (/nextlaunches starts with /next…)
+  if (text.startsWith("/nextlaunches") || text.startsWith("/upcoming")) {
+    const schedule = await kvGetJson(kv, KV_SCHEDULE, null);
+    await reply(env, chatId, formatNextLaunches(schedule));
+    return;
+  }
+
+  if (
+    text.startsWith("/nextlaunch") ||
+    /^\/next(?:@\w+)?(?:\s|$)/i.test(text)
+  ) {
+    const schedule = await kvGetJson(kv, KV_SCHEDULE, null);
+    await reply(env, chatId, formatNextLaunch(schedule));
+    return;
+  }
+
   if (text.startsWith("/status")) {
     const data = await loadUsers(kv);
     const me = data.users[String(userId)];
@@ -699,10 +837,10 @@ async function handleMessage(env, kv, message) {
     await reply(
       env,
       chatId,
-      "Retired. Launch alerts come from the webcast live worker.\n" +
+      "Retired. Try /nextlaunch or /nextlaunches for the plan.\n" +
         (admin
           ? "Ops: /note · /broadcast · /inbox — or run webcast:live --mode test|ops"
-          : "Use /status · /help · /stop"),
+          : "Use /nextlaunch · /status · /help · /stop"),
     );
     return;
   }
@@ -913,7 +1051,7 @@ export default {
       return new Response("TPlus worker ok", { status: 200 });
     }
 
-    // Laptop schedule/OCR → immediate fan-out
+    // Desktop webcast → immediate fan-out
     if (request.method === "POST" && url.pathname === "/suggest") {
       try {
         return await handleSuggestPost(request, env, env.TPLUS_KV);
@@ -921,6 +1059,24 @@ export default {
         console.error("suggest error", e);
         return new Response("error", { status: 500 });
       }
+    }
+
+    // Desktop schedule-from-ll2 → KV for /nextlaunch(es)
+    if (request.method === "POST" && url.pathname === "/schedule-cache") {
+      try {
+        return await handleScheduleCachePost(request, env, env.TPLUS_KV);
+      } catch (e) {
+        console.error("schedule-cache error", e);
+        return new Response("error", { status: 500 });
+      }
+    }
+
+    if (request.method === "GET" && url.pathname === "/schedule-cache") {
+      if (!suggestSecretOk(env, request)) {
+        return new Response("unauthorized", { status: 401 });
+      }
+      const schedule = await kvGetJson(env.TPLUS_KV, KV_SCHEDULE, null);
+      return Response.json(schedule || { launches: [] });
     }
 
     // Admin/laptop: subscriber list (same auth as /suggest). ?check=1 → getChat probe

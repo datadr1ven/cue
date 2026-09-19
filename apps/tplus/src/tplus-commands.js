@@ -7,6 +7,8 @@
 export const TPLUS_USER_COMMANDS = [
   { command: "start", description: "Subscribe to launch alerts" },
   { command: "help", description: "How TPlus works" },
+  { command: "nextlaunch", description: "Next scheduled webcast launch" },
+  { command: "nextlaunches", description: "Upcoming launches on the plan" },
   { command: "status", description: "Subscription status" },
   { command: "stop", description: "Unsubscribe from alerts" },
 ];
