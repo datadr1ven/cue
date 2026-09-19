@@ -14,9 +14,12 @@ captures/
 
 # Large local race captures / downloads (not vendored)
 dutch-2026/
+spain-2026/
 testdata/
 latest-artifacts/
 seemingly-good-data/
+**/__pycache__/
+marketing/
 
 # Ad-hoc capture dumps at repo root
 /*.ndjson

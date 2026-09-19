@@ -435,10 +435,6 @@ def main() -> int:
             info = parse_clock_info(texts)
             clock_sec = info["clockSec"]
             raw = info["raw"]
-            # Display: signed if known, else bare magnitude as |T?|
-            display_sec = clock_sec
-            if display_sec is None and info["unsignedSec"] is not None:
-                display_sec = info["unsignedSec"]  # magnitude only; format as T+
             events = sorted(
                 {m.group(0).upper() for m in EVENT_HINTS.finditer(" ".join(texts))}
             )
