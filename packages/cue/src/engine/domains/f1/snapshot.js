@@ -1397,13 +1397,15 @@ function applyRaceControl(state, p, t) {
       if (startMs != null && endMs != null) {
         const mins = (endMs - startMs) / 60000;
         // Short pure green + few flying laps → Q segment
-        // Mid-length + modest laps → practice (FP)
-        // Long or high lap count → race (Spain GP ~94m/57 laps was mis-tagged practice)
+        // Short green after lots of laps (red-flagged FP) → practice
+        // ~1h single block → practice; much longer → race
+        // Prefer ENGINE_SESSION_KIND / session-ctl for live & replay — this is
+        // only a last-resort guess when kind was never forced.
         if (mins > 0 && mins <= 35 && laps < 50) {
           state.sessionKind = "qualifying";
-        } else if (mins > 0 && mins <= 100 && laps < 40) {
+        } else if (mins > 0 && mins <= 100) {
           state.sessionKind = "practice";
-        } else if (mins > 70 || laps >= 40) {
+        } else if (mins > 100) {
           state.sessionKind = "race";
         }
       } else if (laps >= 50) {

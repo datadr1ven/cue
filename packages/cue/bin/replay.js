@@ -6,6 +6,11 @@
  *   npm run replay -- path/to/signalr.ndjson --signalr
  *   npm run replay -- path/to/session.ndjson --min-severity 7
  *   npm run replay -- path/to/session.ndjson --json
+ *   ENGINE_SESSION_KIND=race npm run replay -- path/to/race.ndjson
+ *   npm run replay -- path/to/race.ndjson --session-kind race
+ *
+ * Without --session-kind / ENGINE_SESSION_KIND, F1 may guess practice/quali/race
+ * from duration — that guess is brittle. Live session-ctl always forces kind.
  */
 
 import { resolve } from "path";
@@ -13,7 +18,13 @@ import { createPipeline } from "../src/engine/pipeline.js";
 import { readNdjsonEvents } from "../src/engine/ingest/ndjson.js";
 
 function parseArgs(argv) {
-  const args = { file: null, minSeverity: 6, json: false, mode: "auto" };
+  const args = {
+    file: null,
+    minSeverity: 6,
+    json: false,
+    mode: "auto",
+    sessionKind: process.env.ENGINE_SESSION_KIND || null,
+  };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") args.json = true;
@@ -22,6 +33,9 @@ function parseArgs(argv) {
     else if (a === "--min-severity") args.minSeverity = Number(argv[++i]);
     else if (a.startsWith("--min-severity="))
       args.minSeverity = Number(a.split("=")[1]);
+    else if (a === "--session-kind") args.sessionKind = argv[++i];
+    else if (a.startsWith("--session-kind="))
+      args.sessionKind = a.split("=")[1];
     else if (!a.startsWith("-")) args.file = a;
   }
   return args;
@@ -31,7 +45,8 @@ async function main() {
   const args = parseArgs(process.argv);
   if (!args.file) {
     console.error(
-      "Usage: npm run replay -- <capture.ndjson> [--signalr|--openf1] [--min-severity N] [--json]",
+      "Usage: npm run replay -- <capture.ndjson> [--signalr|--openf1] [--min-severity N] [--session-kind race|practice|qualifying|…] [--json]\n" +
+        "  (or set ENGINE_SESSION_KIND — same as live session-ctl)",
     );
     process.exit(2);
   }
@@ -43,6 +58,7 @@ async function main() {
     useLlm: false,
     usePrefs: false,
     minSeverity: args.minSeverity,
+    sessionKind: args.sessionKind || undefined,
   });
 
   let events = 0;

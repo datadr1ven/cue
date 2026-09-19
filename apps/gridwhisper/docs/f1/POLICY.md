@@ -66,7 +66,10 @@ Re-open gaps only with evidence from **≥2** sessions (or one unambiguous high-
 ## How to extend
 
 1. Capture or download a session (see GridWhisper app docs / `npm run download`).  
-2. Replay offline: `npm run replay -- path.ndjson` (force `ENGINE_SESSION_KIND` when needed).  
+2. Replay offline with the **same kind live uses** (session-ctl sets `ENGINE_SESSION_KIND`):
+   `ENGINE_SESSION_KIND=race npm run replay -- path.ndjson`  
+   or `npm run replay -- path.ndjson --session-kind race`.  
+   Without that, F1 may guess practice/quali from duration — brittle; don’t treat a wrong guess as a detector bug.  
 3. Diff alerts vs intent; add a detector or suppress rule in `moments.js` / `packages/cue/src/engine/domains/f1/snapshot.js`.  
 4. Prefer a tiny synthetic fixture under `examples/f1/` for the regression, not a full race dump.  
 5. Update this POLICY with capability, priority, and commit SHA.
