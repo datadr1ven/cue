@@ -452,7 +452,7 @@ function userHelp() {
     `High-signal milestones from the live webcast worker (test or ops mode).\n\n` +
     `/start — subscribe\n` +
     `/nextlaunch — next planned webcast\n` +
-    `/nextlaunches — upcoming plan (from desktop schedule)\n` +
+    `/nextlaunches — upcoming launches on the plan\n` +
     `/status — am I subscribed?\n` +
     `/stop — unsubscribe\n` +
     `/help — this message\n\n` +
