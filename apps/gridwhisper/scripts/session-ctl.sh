@@ -20,8 +20,13 @@ SIGNALR_ROOT="${SIGNALR_ROOT:-$CUE_ROOT/../cue-signalr}"
 OUT_DIR="${OUT_DIR:-$CUE_ROOT/captures}"
 RUN_DIR="${RUN_DIR:-$OUT_DIR/run}"
 LOG_DIR="${LOG_DIR:-$OUT_DIR/logs}"
-SESSIONS=(fp1 fp2 fp3 quali race)
-ROLES=(worker mqtt signalr-auth signalr-noauth)
+SESSIONS=(fp1 fp2 fp3 quali race sprint)
+# signalr-auth omitted by default — Spain A/B showed auth≈noauth for capture;
+# set SIGNALR_AUTH=1 to also run the authenticated twin.
+ROLES=(worker mqtt signalr-noauth)
+if [[ "${SIGNALR_AUTH:-0}" == "1" ]]; then
+  ROLES=(worker mqtt signalr-auth signalr-noauth)
+fi
 
 mkdir -p "$OUT_DIR" "$RUN_DIR" "$LOG_DIR"
 
@@ -44,7 +49,7 @@ session_kind_for() {
   case "$1" in
     fp1|fp2|fp3) echo practice ;;
     quali) echo qualifying ;;
-    race) echo race ;;
+    race|sprint) echo race ;;
     *) echo "unknown session: $1" >&2; exit 2 ;;
   esac
 }
@@ -126,29 +131,26 @@ cmd_start() {
     echo "ERROR: DELIVER_URL/SECRET missing — worker:live:http will fail" >&2
     exit 1
   fi
-  if [[ -z "${F1_TOKEN:-}${F1_SUBSCRIPTION_TOKEN:-}" ]]; then
-    echo "WARN: no F1_TOKEN in env — signalr-auth will also be no_auth" >&2
-  else
-    echo "F1_TOKEN present — signalr-auth will use it; signalr-noauth unsets it"
-  fi
-
   echo "=== START $session ($(date -Is)) kind=$kind OUT_DIR=$OUT_DIR ==="
   echo "MQTT            → $mqtt_out"
-  echo "SignalR auth    → $sr_auth_out"
   echo "SignalR noauth  → $sr_noauth_out"
+  if [[ "${SIGNALR_AUTH:-0}" == "1" ]]; then
+    echo "SignalR auth    → $sr_auth_out (SIGNALR_AUTH=1)"
+  fi
 
   start_one "$session" mqtt \
     "cd '$CUE_ROOT' && MQTT_SOURCE=live npm run capture -- '$mqtt_out'"
 
-  # Authenticated: inherit F1_TOKEN from this shell / .env
-  start_one "$session" signalr-auth \
-    "cd '$SIGNALR_ROOT' && npm run capture:signalr -- '$sr_auth_out'"
-
-  # Explicit no-auth twin. Must SET empty tokens (not unset): capture-signalr
+  # No-auth SignalR (default). Must SET empty tokens (not unset): capture-signalr
   # dotenv-loads cue-signalr/.env and would refill F1_TOKEN after env -u.
   # SIGNALR_NO_AUTH=1 is a hard override inside the capture binary.
   start_one "$session" signalr-noauth \
     "cd '$SIGNALR_ROOT' && SIGNALR_NO_AUTH=1 F1_TOKEN= F1_SUBSCRIPTION_TOKEN= npm run capture:signalr -- '$sr_noauth_out'"
+
+  if [[ "${SIGNALR_AUTH:-0}" == "1" ]]; then
+    start_one "$session" signalr-auth \
+      "cd '$SIGNALR_ROOT' && npm run capture:signalr -- '$sr_auth_out'"
+  fi
 
   start_one "$session" worker \
     "cd '$CUE_ROOT' && MQTT_SOURCE=live DELIVERY_MODE=http ENGINE_SESSION_KIND=$kind npm run worker:live:http"
@@ -161,15 +163,17 @@ cmd_stop() {
   echo "=== STOP $session ($(date -Is)) ==="
   stop_one "$session" worker
   stop_one "$session" mqtt
-  stop_one "$session" signalr-auth
   stop_one "$session" signalr-noauth
+  stop_one "$session" signalr-auth
   echo "=== STOP done $session ==="
 }
 
 cmd_status() {
   echo "=== STATUS ($(date -Is)) OUT_DIR=$OUT_DIR ==="
+  # Always list auth slot too (may be leftover from older starts)
+  local status_roles=(worker mqtt signalr-noauth signalr-auth)
   for session in "${SESSIONS[@]}"; do
-    for role in "${ROLES[@]}"; do
+    for role in "${status_roles[@]}"; do
       local pf
       pf="$(pidfile "$session" "$role")"
       if is_running "$pf"; then
