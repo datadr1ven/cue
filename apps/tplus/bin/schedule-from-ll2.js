@@ -136,7 +136,7 @@ function considerLaunch(launch, now, horizonH) {
 
   const timeline = launch.timeline || [];
   if (!timeline.length) {
-    return { ok: false, reason: "empty timeline" };
+    reasons.push("empty timeline — T+0 liftoff only");
   }
 
   const startAt = addMinutes(net, -LEAD_MIN);
