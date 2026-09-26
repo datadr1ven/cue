@@ -757,22 +757,19 @@ export function buildPitMoment(pit, opts = {}) {
   // Top-5 pit under SC is the defining strategy call (Silverstone HAM→RUS)
   const underScPit = underSc && posIn != null && posIn <= 5;
 
-  // Sparse race desk (Dutch GP): green-flag stops outside the lead group are
-  // wallpaper. Keep top-5 always; under VSC/SC allow top-10; SC top-5 boosted.
-  if (!underSc && !underVsc && posIn != null && posIn > 5) {
-    return null;
-  }
-  if ((underSc || underVsc) && posIn != null && posIn > 10) {
+  // Sparse race desk: only top-5 pit-ins (green or SC/VSC). Baku '26 SC waves
+  // alerted P6–P10 as wallpaper when we allowed top-10 under safety car.
+  if (posIn != null && posIn > 5) {
     return null;
   }
 
-  // Midfield pits stay sev 5 (below default floor 6); leaders/top 10 are 6–7
+  // Midfield (should be filtered above) stays sev 5; leaders 6–8
   let severity = 5;
   if (posIn != null && posIn <= 3) severity = 7;
-  else if (posIn != null && posIn <= 10) severity = 6;
+  else if (posIn != null && posIn <= 5) severity = 6;
   if (opts.state && num === opts.state.leader) severity = 7;
   if (underScPit) severity = Math.max(severity, 8);
-  else if ((underSc || underVsc) && posIn != null && posIn <= 10) {
+  else if ((underSc || underVsc) && posIn != null && posIn <= 5) {
     severity = Math.max(severity, 6);
   }
 
@@ -1227,6 +1224,32 @@ export function resolveFinishOrder(state, n = 5) {
       source: "position",
     };
   }
+
+  // Prefer board frozen at CHEQUERED over reconstructed lap times. OpenF1 MQTT
+  // often loses a unique P1 near the flag (Baku '26 → insane map → lap-time
+  // order wrongly crowned Verstappen; SignalR / orderAtChequered had Russell).
+  const frozen = Array.isArray(state.orderAtChequered)
+    ? state.orderAtChequered.slice(0, Math.max(n, 10))
+    : [];
+  if (frozen.length >= 3 && frozen.some((r) => Number(r.pos) === 1)) {
+    const seen = new Set();
+    let dup = false;
+    for (const r of frozen) {
+      if (seen.has(r.pos)) {
+        dup = true;
+        break;
+      }
+      seen.add(r.pos);
+    }
+    if (!dup) {
+      return {
+        rows: frozen.slice(0, n),
+        provisional: true,
+        source: "chequered_board",
+      };
+    }
+  }
+
   const fromLaps = finishOrderFromLaps(state, n);
   if (fromLaps.length >= 3) {
     return {
