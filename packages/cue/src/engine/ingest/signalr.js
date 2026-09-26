@@ -25,6 +25,10 @@ export function createSignalRMergeState() {
     compounds: new Map(),
     /** From SessionInfo.Path — prefixes TeamRadio mp3 paths */
     sessionPath: null,
+    /** driver → last LastLapTime.Value string we emitted as f1.laps */
+    lastLapTimeStr: new Map(),
+    /** driver → NumberOfLaps */
+    lapCount: new Map(),
   };
 }
 
@@ -299,6 +303,40 @@ function expandTimingData(payload, base, merge) {
       }
     }
 
+    if (rec.NumberOfLaps != null) {
+      const ln = Number(rec.NumberOfLaps);
+      if (Number.isFinite(ln)) merge.lapCount.set(num, ln);
+    }
+
+    // Completed lap → f1.laps (feeds quali session_best / prov_p1 / close_to_pole)
+    const lastLap = rec.LastLapTime;
+    const lapStr =
+      lastLap && typeof lastLap === "object" ? String(lastLap.Value || "") : "";
+    if (lapStr && lapStr !== merge.lastLapTimeStr.get(num)) {
+      merge.lastLapTimeStr.set(num, lapStr);
+      const timeSec = parseLapTimeToSec(lapStr);
+      if (timeSec != null) {
+        const lapNumber =
+          numOrNull(rec.NumberOfLaps) ?? merge.lapCount.get(num) ?? null;
+        out.push({
+          type: "f1.laps",
+          t: base.t,
+          source: base.source,
+          topic: base.topic,
+          payload: {
+            date_start: base.t,
+            driver_number: num,
+            lap_number: lapNumber,
+            lap_duration: timeSec,
+            is_pit_out_lap: false,
+            _signalrLastLap: lapStr,
+            _signalrPersonalFastest: Boolean(lastLap.PersonalFastest),
+            _signalrOverallFastest: Boolean(lastLap.OverallFastest),
+          },
+        });
+      }
+    }
+
     if (typeof rec.InPit === "boolean") {
       const was = merge.inPit.get(num);
       merge.inPit.set(num, rec.InPit);
@@ -312,7 +350,7 @@ function expandTimingData(payload, base, merge) {
           payload: {
             date: base.t,
             driver_number: num,
-            lap_number: numOrNull(rec.NumberOfLaps),
+            lap_number: numOrNull(rec.NumberOfLaps) ?? merge.lapCount.get(num) ?? null,
             pit_duration: null,
             stop_duration: null,
             _signalr: true,
@@ -322,6 +360,31 @@ function expandTimingData(payload, base, merge) {
     }
   }
   return out;
+}
+
+/** "1:43.037" / "58.123" → seconds; empty/invalid → null */
+function parseLapTimeToSec(raw) {
+  const s = String(raw || "").trim();
+  if (!s || s === "-") return null;
+  const parts = s.split(":");
+  if (parts.length === 1) {
+    const n = Number(parts[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (parts.length === 2) {
+    const min = Number(parts[0]);
+    const sec = Number(parts[1]);
+    if (!Number.isFinite(min) || !Number.isFinite(sec)) return null;
+    return min * 60 + sec;
+  }
+  if (parts.length === 3) {
+    const h = Number(parts[0]);
+    const min = Number(parts[1]);
+    const sec = Number(parts[2]);
+    if (![h, min, sec].every(Number.isFinite)) return null;
+    return h * 3600 + min * 60 + sec;
+  }
+  return null;
 }
 
 function expandTimingAppData(payload, base, merge) {
