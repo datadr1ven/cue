@@ -1270,8 +1270,15 @@ export function resolveFinishOrder(state, n = 5) {
     }
   }
 
+  // Lap-time reconstruction only if we had a sane board earlier this session.
+  // Baku '26 MQTT never published position=1 at all — lap order invented a
+  // false Verstappen win. Better an incomplete approx than a wrong crown.
   const fromLaps = finishOrderFromLaps(state, n);
-  if (fromLaps.length >= 3) {
+  if (
+    fromLaps.length >= 3 &&
+    Array.isArray(state.lastSaneOrder) &&
+    state.lastSaneOrder.length >= 3
+  ) {
     return {
       rows: fromLaps.slice(0, n),
       provisional: true,
