@@ -52,8 +52,12 @@ const CANCEL_STATUS = new Set([
   "Abandoned",
 ]);
 
-/** Extra minutes beyond LEAD_MIN before we call a start "too early" vs new NET */
-const CHECK_SLACK_MIN = 10;
+/**
+ * Pre-start: still GO (park on webcast) if NET is within this many minutes.
+ * Only SLIP+reschedule when NET moved further out (Owlright: 43m > old 40m
+ * gate aborted a 13m slip — parking would have been fine).
+ */
+const GO_WITHIN_MIN = Number(process.env.TPLUS_CHECK_GO_WITHIN_MIN || 90);
 
 /** Exit codes for --check-start (webcast-ctl.sh) */
 export const CHECK_GO = 0;
@@ -296,24 +300,31 @@ async function checkStart(ll2Id) {
       windowEnd: windowEnd.toISOString(),
     };
   }
-  // Start cron fired but NET slipped later — still more than lead+slack away
+  // Start cron fired but NET may have slipped. Park if still reasonably soon;
+  // only defer when NET is well beyond the usual lead window.
   const msUntilNet = net.getTime() - now.getTime();
-  const tooEarlyMs = (LEAD_MIN + CHECK_SLACK_MIN) * 60 * 1000;
-  if (msUntilNet > tooEarlyMs) {
+  const goWithinMs = GO_WITHIN_MIN * 60 * 1000;
+  if (msUntilNet > goWithinMs) {
     return {
       code: CHECK_SLIP,
       action: "slip",
-      reason: `NET in ${Math.round(msUntilNet / 60000)}m (need ≤${LEAD_MIN + CHECK_SLACK_MIN}m)`,
+      reason: `NET in ${Math.round(msUntilNet / 60000)}m (go if ≤${GO_WITHIN_MIN}m; will reschedule)`,
       launch,
       name,
       net: net.toISOString(),
       windowEnd: windowEnd.toISOString(),
     };
   }
+  const mins = Math.round(msUntilNet / 60000);
   return {
     code: CHECK_GO,
     action: "go",
-    reason: "imminent or in window",
+    reason:
+      msUntilNet > LEAD_MIN * 60 * 1000
+        ? `NET in ${mins}m — starting early to park (slip <${GO_WITHIN_MIN}m)`
+        : msUntilNet > 0
+          ? `NET in ${mins}m`
+          : "NET passed / in window",
     launch,
     name,
     net: net.toISOString(),

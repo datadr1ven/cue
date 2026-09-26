@@ -102,8 +102,18 @@ check_start_ll2() {
 
 apply_schedule() {
   echo "[$RUN_KEY] refreshing schedule (LL2 → crontab)…"
-  (cd "$CUE_ROOT" && node apps/tplus/bin/schedule-from-ll2.js --apply-crontab) || \
+  if ! (cd "$CUE_ROOT" && node apps/tplus/bin/schedule-from-ll2.js --apply-crontab); then
     echo "[$RUN_KEY] WARN: --apply-crontab failed" >&2
+    return 1
+  fi
+  # Make the new start/stop lines obvious in cron.log (Owlright: slip with no
+  # visible reschedule left us thinking the gate just aborted).
+  if [[ -n "${1:-}" ]]; then
+    echo "[$RUN_KEY] crontab lines for $1 after refresh:"
+    crontab -l 2>/dev/null | grep -F "$1" || \
+      echo "[$RUN_KEY] (no crontab lines for $1 — not in horizon?)"
+  fi
+  return 0
 }
 
 cmd_start() {
@@ -135,10 +145,16 @@ cmd_start() {
     check_start_ll2 "$ll2_id"
     ec=$?
     set -e
-    if [[ "$ec" -eq 75 || "$ec" -eq 76 ]]; then
-      echo "[$RUN_KEY] check-start deferred (ec=$ec) — not spawning webcast:live"
-      apply_schedule
-      echo "=== START deferred $RUN_KEY ==="
+    if [[ "$ec" -eq 75 ]]; then
+      echo "[$RUN_KEY] check-start SLIP (ec=75) — not spawning; rewriting crontab for new NET"
+      apply_schedule "$ll2_id" || true
+      echo "=== START deferred $RUN_KEY (await new cron start) ==="
+      return 0
+    fi
+    if [[ "$ec" -eq 76 ]]; then
+      echo "[$RUN_KEY] check-start CANCEL (ec=76) — not spawning; refreshing schedule"
+      apply_schedule "$ll2_id" || true
+      echo "=== START cancelled $RUN_KEY ==="
       return 0
     fi
     if [[ "$ec" -ne 0 ]]; then
