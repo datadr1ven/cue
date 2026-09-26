@@ -380,7 +380,10 @@ function raceFinishLine(prefix, d) {
     const win = d.winnerName ? `Winner (provisional): ${d.winnerName}\n` : "";
     return `${p}\n${win}${line}\n(from lap times · board incomplete)`;
   }
-  if (d.provisional && d.orderSource === "chequered_board") {
+  if (
+    d.provisional &&
+    (d.orderSource === "chequered_board" || d.orderSource === "last_sane_order")
+  ) {
     return `${finishLine(`${p} (at flag)`, top5)}`;
   }
   if (d.provisional) {

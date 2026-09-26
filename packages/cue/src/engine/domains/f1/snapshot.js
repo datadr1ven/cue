@@ -129,6 +129,9 @@ export function createF1State() {
     chequeredCount: 0,
     /** Order frozen at last chequered (for delayed Q cut) */
     orderAtChequered: null,
+    /** Last top-N board while isPositionMapSane (fallback if P1 drops at flag) */
+    lastSaneOrder: null,
+    lastSaneOrderT: null,
     /** Chequered waiting for next SESSION STARTED (multi-segment quali) */
     awaitingNextSegment: false,
     /** Segment index that just ended (for cut emission) */
@@ -297,6 +300,8 @@ export function reduceF1(state, event, opts = {}) {
     next.segment = 0;
     next.segmentStartT = null;
     next.orderAtChequered = null;
+    next.lastSaneOrder = null;
+    next.lastSaneOrderT = null;
     next.awaitingNextSegment = false;
     next.endedSegment = null;
     next.sessionBest = null;
@@ -362,10 +367,13 @@ export function reduceF1(state, event, opts = {}) {
       if (num == null || pos == null) break;
       next.position[num] = Number(pos);
       next.leader = computeLeader(next.position);
-      // After chequered, cars already on a flying lap can still improve —
-      // keep the freeze list fresh until the next segment starts (cut time).
-      if (next.awaitingNextSegment) {
-        next.orderAtChequered = orderedField(next, 30);
+      if (isPositionMapSane(next)) {
+        next.lastSaneOrder = orderedField(next, 30);
+        next.lastSaneOrderT = event.t || next.lastEventT;
+        // Quali: refresh cut board only while the map still has a real P1
+        if (next.awaitingNextSegment) {
+          next.orderAtChequered = next.lastSaneOrder;
+        }
       }
       break;
     }
@@ -1142,6 +1150,15 @@ function updateSegmentTimeSheet(state, driver, timeSec, t, lap) {
   }
 }
 
+/** Freeze finishing board: current map if sane, else last known sane order. */
+function freezeOrderAtChequered(state) {
+  if (isPositionMapSane(state)) return orderedField(state, 30);
+  if (Array.isArray(state.lastSaneOrder) && state.lastSaneOrder.length >= 3) {
+    return state.lastSaneOrder.slice(0, 30);
+  }
+  return orderedField(state, 30);
+}
+
 /**
  * Position board is trustworthy if it has a unique P1 and no duplicate slots.
  * @param {object} state
@@ -1225,28 +1242,31 @@ export function resolveFinishOrder(state, n = 5) {
     };
   }
 
-  // Prefer board frozen at CHEQUERED over reconstructed lap times. OpenF1 MQTT
-  // often loses a unique P1 near the flag (Baku '26 → insane map → lap-time
-  // order wrongly crowned Verstappen; SignalR / orderAtChequered had Russell).
-  const frozen = Array.isArray(state.orderAtChequered)
-    ? state.orderAtChequered.slice(0, Math.max(n, 10))
-    : [];
-  if (frozen.length >= 3 && frozen.some((r) => Number(r.pos) === 1)) {
-    const seen = new Set();
-    let dup = false;
-    for (const r of frozen) {
-      if (seen.has(r.pos)) {
-        dup = true;
-        break;
+  // Prefer last sane live board (or freeze at flag) over lap reconstruction.
+  // Baku '26 MQTT: P1 vanished from v1/position near chequered; lap-time order
+  // wrongly crowned Verstappen. SignalR kept Russell as P1 throughout.
+  for (const [source, board] of [
+    ["chequered_board", state.orderAtChequered],
+    ["last_sane_order", state.lastSaneOrder],
+  ]) {
+    const rows = Array.isArray(board) ? board.slice(0, Math.max(n, 10)) : [];
+    if (rows.length >= 3 && rows.some((r) => Number(r.pos) === 1)) {
+      const seen = new Set();
+      let dup = false;
+      for (const r of rows) {
+        if (seen.has(r.pos)) {
+          dup = true;
+          break;
+        }
+        seen.add(r.pos);
       }
-      seen.add(r.pos);
-    }
-    if (!dup) {
-      return {
-        rows: frozen.slice(0, n),
-        provisional: true,
-        source: "chequered_board",
-      };
+      if (!dup) {
+        return {
+          rows: rows.slice(0, n),
+          provisional: true,
+          source,
+        };
+      }
     }
   }
 
@@ -1382,7 +1402,7 @@ function applyRaceControl(state, p, t) {
     state.sessionActive = false;
     state.chequeredCount = (state.chequeredCount || 0) + 1;
     state.endedSegment = state.segment || 1;
-    state.orderAtChequered = orderedField(state, 30);
+    state.orderAtChequered = freezeOrderAtChequered(state);
     state.awaitingNextSegment = true;
     armPendingRaceFinish(
       state,
@@ -1401,7 +1421,7 @@ function applyRaceControl(state, p, t) {
     state.sessionActive = false;
     state.chequeredCount = (state.chequeredCount || 0) + 1;
     state.endedSegment = state.segment || 1;
-    state.orderAtChequered = orderedField(state, 30);
+    state.orderAtChequered = freezeOrderAtChequered(state);
     state.awaitingNextSegment = true;
 
     // Race/sprint: defer finish board until lap completions arrive (often ~1s later)
