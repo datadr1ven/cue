@@ -13,6 +13,7 @@
  *   positions: Map<number, number>,
  *   inPit: Map<number, boolean>,
  *   compounds: Map<number, string>,
+ *   sessionPath: string|null,
  * }} SignalRMergeState
  */
 
@@ -22,6 +23,8 @@ export function createSignalRMergeState() {
     positions: new Map(),
     inPit: new Map(),
     compounds: new Map(),
+    /** From SessionInfo.Path — prefixes TeamRadio mp3 paths */
+    sessionPath: null,
   };
 }
 
@@ -45,6 +48,8 @@ export function expandSignalRLine(line, merge = createSignalRMergeState()) {
   switch (topic) {
     case "DriverList":
       return expandDriverList(payload, base);
+    case "SessionInfo":
+      return expandSessionInfo(payload, base, merge);
     case "RaceControlMessages":
       return expandRaceControl(payload, base, line.snapshot);
     case "WeatherData":
@@ -59,10 +64,36 @@ export function expandSignalRLine(line, merge = createSignalRMergeState()) {
     case "TimingAppData":
       return expandTimingAppData(payload, base, merge);
     case "TeamRadio":
-      return expandTeamRadio(payload, base);
+      return expandTeamRadio(payload, base, merge);
     default:
       return [];
   }
+}
+
+function expandSessionInfo(payload, base, merge) {
+  if (!payload || typeof payload !== "object") return [];
+  const path = payload.Path || payload.path || null;
+  if (path && typeof path === "string") {
+    merge.sessionPath = path.endsWith("/") ? path : `${path}/`;
+  }
+  const meeting = payload.Meeting || {};
+  return [
+    {
+      type: "f1.sessions",
+      t: base.t,
+      source: base.source,
+      topic: base.topic,
+      payload: {
+        session_name: payload.Name || payload.Type || null,
+        session_type: payload.Type || null,
+        date_start: payload.StartDate || null,
+        circuit_short_name: meeting.Circuit?.ShortName || meeting.Location || null,
+        location: meeting.Location || null,
+        country_name: meeting.Country?.Name || null,
+        meeting_name: meeting.Name || meeting.OfficialName || null,
+      },
+    },
+  ];
 }
 
 function expandDriverList(payload, base) {
@@ -336,15 +367,45 @@ function expandTimingAppData(payload, base, merge) {
   return out;
 }
 
-function expandTeamRadio(payload, base) {
+function expandTeamRadio(payload, base, merge) {
   if (!payload || typeof payload !== "object") return [];
   const captures = payload.Captures || payload.captures;
-  if (!Array.isArray(captures)) return [];
-  return captures
+  // Snapshots: Captures is an array. Live deltas: often { "2": { … }, "3": { … } }.
+  /** @type {object[]} */
+  let list = [];
+  if (Array.isArray(captures)) {
+    list = captures.filter((c) => c && typeof c === "object");
+  } else if (captures && typeof captures === "object") {
+    list = Object.values(captures).filter((c) => c && typeof c === "object");
+  }
+  if (!list.length) return [];
+
+  const prefix = merge?.sessionPath || "";
+
+  return list
     .map((c) => {
       const num = parseRacingNumber(c.RacingNumber);
       if (!Number.isFinite(num)) return null;
       const path = c.Path || c.path;
+      if (!path) return null;
+      let rel = String(path);
+      if (rel.startsWith("http")) {
+        return {
+          type: "f1.team_radio",
+          t: c.Utc || base.t,
+          source: base.source,
+          topic: base.topic,
+          payload: {
+            date: c.Utc || base.t,
+            driver_number: num,
+            recording_url: rel,
+          },
+        };
+      }
+      // Already meeting-qualified vs short "TeamRadio/….mp3"
+      if (!rel.includes("Grand_Prix") && !rel.startsWith("20") && prefix) {
+        rel = `${prefix}${rel}`;
+      }
       return {
         type: "f1.team_radio",
         t: c.Utc || base.t,
@@ -353,9 +414,7 @@ function expandTeamRadio(payload, base) {
         payload: {
           date: c.Utc || base.t,
           driver_number: num,
-          recording_url: path
-            ? `https://livetiming.formula1.com/static/${path}`
-            : null,
+          recording_url: `https://livetiming.formula1.com/static/${rel}`,
         },
       };
     })
