@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Start/stop GridWhisper live worker + OpenF1 MQTT capture + dual SignalR
-# captures (authenticated + no_auth) for a named session.
+# Start/stop GridWhisper live worker + OpenF1 MQTT capture + SignalR capture
+# for a named session.
 #
-#   OUT_DIR=.../spain-2026 session-ctl.sh start fp1|fp2|fp3|quali|race
-#   OUT_DIR=.../spain-2026 session-ctl.sh stop  fp1|fp2|fp3|quali|race
-#   OUT_DIR=.../spain-2026 session-ctl.sh status
+#   OUT_DIR=.../baku-2026 session-ctl.sh start fp1|fp2|fp3|quali|race|sprint
+#   ENGINE_SOURCE=signalr|openf1  (default: signalr — worker feed)
+#   SIGNALR_AUTH=1                (optional authenticated SignalR capture twin)
 #
-# Authenticated SignalR inherits F1_TOKEN from .env at start time.
-# No-auth SignalR clears F1_TOKEN / F1_SUBSCRIPTION_TOKEN for that process only.
+# Captures (gold): MQTT + SignalR-noauth always.
+# Worker alerts: ENGINE_SOURCE=signalr (F1 hub) or openf1 (MQTT).
 #
 set -euo pipefail
 
@@ -15,11 +15,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _DEFAULT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CUE_ROOT="${CUE_ROOT:-$_DEFAULT_ROOT}"
-# Optional sibling checkout for SignalR capture tooling (override on desktop)
-SIGNALR_ROOT="${SIGNALR_ROOT:-$CUE_ROOT/../cue-signalr}"
+# Capture:signalr lives in cue (apps/gridwhisper). Override for legacy sibling.
+SIGNALR_ROOT="${SIGNALR_ROOT:-$CUE_ROOT}"
 OUT_DIR="${OUT_DIR:-$CUE_ROOT/captures}"
 RUN_DIR="${RUN_DIR:-$OUT_DIR/run}"
 LOG_DIR="${LOG_DIR:-$OUT_DIR/logs}"
+ENGINE_SOURCE="${ENGINE_SOURCE:-signalr}"
 SESSIONS=(fp1 fp2 fp3 quali race sprint)
 # signalr-auth omitted by default — Spain A/B showed auth≈noauth for capture;
 # set SIGNALR_AUTH=1 to also run the authenticated twin.
@@ -41,7 +42,7 @@ set -a
 set +a
 
 usage() {
-  echo "Usage: OUT_DIR=... $0 start|stop|status [fp1|fp2|fp3|quali|race]" >&2
+  echo "Usage: OUT_DIR=... ENGINE_SOURCE=signalr|openf1 $0 start|stop|status [fp1|fp2|fp3|quali|race|sprint]" >&2
   exit 2
 }
 
@@ -131,19 +132,18 @@ cmd_start() {
     echo "ERROR: DELIVER_URL/SECRET missing — worker:live:http will fail" >&2
     exit 1
   fi
-  echo "=== START $session ($(date -Is)) kind=$kind OUT_DIR=$OUT_DIR ==="
-  echo "MQTT            → $mqtt_out"
+  echo "=== START $session ($(date -Is)) kind=$kind OUT_DIR=$OUT_DIR ENGINE_SOURCE=$ENGINE_SOURCE ==="
+  echo "MQTT capture    → $mqtt_out"
   echo "SignalR noauth  → $sr_noauth_out"
   if [[ "${SIGNALR_AUTH:-0}" == "1" ]]; then
     echo "SignalR auth    → $sr_auth_out (SIGNALR_AUTH=1)"
   fi
+  echo "Worker feed     → $ENGINE_SOURCE"
 
   start_one "$session" mqtt \
     "cd '$CUE_ROOT' && MQTT_SOURCE=live npm run capture -- '$mqtt_out'"
 
-  # No-auth SignalR (default). Must SET empty tokens (not unset): capture-signalr
-  # dotenv-loads cue-signalr/.env and would refill F1_TOKEN after env -u.
-  # SIGNALR_NO_AUTH=1 is a hard override inside the capture binary.
+  # No-auth SignalR capture twin (gold). SIGNALR_NO_AUTH=1 hard-overrides .env tokens.
   start_one "$session" signalr-noauth \
     "cd '$SIGNALR_ROOT' && SIGNALR_NO_AUTH=1 F1_TOKEN= F1_SUBSCRIPTION_TOKEN= npm run capture:signalr -- '$sr_noauth_out'"
 
@@ -152,8 +152,13 @@ cmd_start() {
       "cd '$SIGNALR_ROOT' && npm run capture:signalr -- '$sr_auth_out'"
   fi
 
-  start_one "$session" worker \
-    "cd '$CUE_ROOT' && MQTT_SOURCE=live DELIVERY_MODE=http ENGINE_SESSION_KIND=$kind npm run worker:live:http"
+  if [[ "$ENGINE_SOURCE" == "signalr" ]]; then
+    start_one "$session" worker \
+      "cd '$CUE_ROOT' && ENGINE_SOURCE=signalr DELIVERY_MODE=http ENGINE_SESSION_KIND=$kind npm run worker:live:signalr:http"
+  else
+    start_one "$session" worker \
+      "cd '$CUE_ROOT' && ENGINE_SOURCE=openf1 MQTT_SOURCE=live DELIVERY_MODE=http ENGINE_SESSION_KIND=$kind npm run worker:live:http"
+  fi
 
   echo "=== START done $session ==="
 }

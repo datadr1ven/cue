@@ -2,8 +2,7 @@
  * First-draft F1 SignalR capture → Cue IngestEvent (OpenF1-shaped payloads).
  *
  * Goal: offline replay of livetiming NDJSON through the existing F1 domain
- * without OpenF1. Not yet a live worker — state merge for TimingData deltas
- * is intentionally minimal.
+ * without OpenF1. Also used by ENGINE_SOURCE=signalr live worker.
  *
  * Capture line shape (from capture-signalr.js):
  *   { source, receivedAt, topic, payload, snapshot?, hubTime? }
@@ -44,6 +43,8 @@ export function expandSignalRLine(line, merge = createSignalRMergeState()) {
   const base = { source: "f1-signalr", topic, t };
 
   switch (topic) {
+    case "DriverList":
+      return expandDriverList(payload, base);
     case "RaceControlMessages":
       return expandRaceControl(payload, base, line.snapshot);
     case "WeatherData":
@@ -53,6 +54,7 @@ export function expandSignalRLine(line, merge = createSignalRMergeState()) {
     case "TrackStatus":
       return expandTrackStatus(payload, base);
     case "TimingData":
+      // Snapshots seed merge + emit full board (Baku: need P1 from first paint)
       return expandTimingData(payload, base, merge);
     case "TimingAppData":
       return expandTimingAppData(payload, base, merge);
@@ -61,6 +63,32 @@ export function expandSignalRLine(line, merge = createSignalRMergeState()) {
     default:
       return [];
   }
+}
+
+function expandDriverList(payload, base) {
+  if (!payload || typeof payload !== "object") return [];
+  /** @type {import('../types.js').IngestEvent[]} */
+  const out = [];
+  for (const [key, rec] of Object.entries(payload)) {
+    if (!rec || typeof rec !== "object") continue;
+    if (key.startsWith("_")) continue;
+    const num = parseRacingNumber(rec.RacingNumber ?? key);
+    if (!Number.isFinite(num)) continue;
+    out.push({
+      type: "f1.drivers",
+      t: base.t,
+      source: base.source,
+      topic: base.topic,
+      payload: {
+        driver_number: num,
+        name_acronym: rec.Tla || rec.tla || null,
+        broadcast_name: rec.BroadcastName || rec.FullName || null,
+        full_name: rec.FullName || null,
+        team_name: rec.TeamName || null,
+      },
+    });
+  }
+  return out;
 }
 
 function expandRaceControl(payload, base, isSnapshot) {

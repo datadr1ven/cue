@@ -21,8 +21,9 @@ import { execFileSync } from "child_process";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(ROOT, "../..");
 const CTL = join(ROOT, "scripts/session-ctl.sh");
-const SIGNALR_ROOT =
-  process.env.SIGNALR_ROOT || join(REPO, "../cue-signalr");
+const SIGNALR_ROOT = process.env.SIGNALR_ROOT || REPO;
+/** Worker feed for session-ctl starts (signalr recommended after Baku MQTT P1 gap). */
+const ENGINE_SOURCE = process.env.ENGINE_SOURCE || "signalr";
 /** Set after we know which meeting is next (or GRIDWHISPER_CAPTURE_DIR). */
 let OUT_DIR =
   process.env.GRIDWHISPER_CAPTURE_DIR || join(REPO, "captures");
@@ -198,6 +199,7 @@ function buildCrontabBlock(entries) {
     `MAILTO=""`,
     `CUE_ROOT=${REPO}`,
     `SIGNALR_ROOT=${SIGNALR_ROOT}`,
+    `ENGINE_SOURCE=${ENGINE_SOURCE}`,
     `OUT_DIR=${OUT_DIR}`,
     `CTL=${CTL}`,
     ``,
@@ -208,10 +210,10 @@ function buildCrontabBlock(entries) {
       `# ${e.sessionName} · ${where || "?"} · ${e.dateStart} → ${e.dateEnd}`,
     );
     lines.push(
-      `${e.cronStart} OUT_DIR=$OUT_DIR SIGNALR_ROOT=$SIGNALR_ROOT $CTL start ${e.key} >> $OUT_DIR/logs/cron.log 2>&1`,
+      `${e.cronStart} OUT_DIR=$OUT_DIR SIGNALR_ROOT=$SIGNALR_ROOT ENGINE_SOURCE=$ENGINE_SOURCE $CTL start ${e.key} >> $OUT_DIR/logs/cron.log 2>&1`,
     );
     lines.push(
-      `${e.cronStop} OUT_DIR=$OUT_DIR SIGNALR_ROOT=$SIGNALR_ROOT $CTL stop ${e.key} >> $OUT_DIR/logs/cron.log 2>&1`,
+      `${e.cronStop} OUT_DIR=$OUT_DIR SIGNALR_ROOT=$SIGNALR_ROOT ENGINE_SOURCE=$ENGINE_SOURCE $CTL stop ${e.key} >> $OUT_DIR/logs/cron.log 2>&1`,
     );
     lines.push("");
   }

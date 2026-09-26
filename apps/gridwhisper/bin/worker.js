@@ -1,19 +1,34 @@
 #!/usr/bin/env node
 /**
- * MQTT → Cue pipeline → delivery (http | telegram | log | none)
+ * Live GridWhisper worker — OpenF1 MQTT or F1 SignalR → Cue pipeline → delivery
  *
- *   MQTT_SOURCE=local DELIVERY_MODE=log npm run worker
- *   npm run worker:live:log
- *   # GridWhisper race day (CF fan-out):
- *   DELIVER_URL=… DELIVER_SECRET=… npm run worker:live:http
+ *   ENGINE_SOURCE=openf1 MQTT_SOURCE=live DELIVERY_MODE=http npm run worker
+ *   ENGINE_SOURCE=signalr DELIVERY_MODE=http npm run worker
+ *
+ *   npm run worker:live:http              # OpenF1 (default)
+ *   npm run worker:live:signalr:http      # SignalR
  *
  * Sends one Telegram banner when the watcher comes online and one when it
  * shuts down (SIGINT/SIGTERM). Disable with LIFECYCLE_BANNERS=off.
  */
 
 import { startMqttWorker } from "../src/mqtt-worker.js";
+import { startSignalRWorker } from "../src/signalr-worker.js";
 
-startMqttWorker().catch((err) => {
+const feed = String(process.env.ENGINE_SOURCE || "openf1")
+  .trim()
+  .toLowerCase();
+
+const starter =
+  feed === "signalr" ? startSignalRWorker : startMqttWorker;
+
+if (feed !== "signalr" && feed !== "openf1" && feed !== "mqtt" && feed !== "ndjson") {
+  console.warn(
+    `ENGINE_SOURCE=${feed} not openf1|signalr — defaulting to OpenF1 MQTT`,
+  );
+}
+
+starter().catch((err) => {
   console.error("Worker failed:", err.message || err);
   process.exit(1);
 });
