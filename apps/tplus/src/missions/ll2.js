@@ -37,6 +37,14 @@ export const LL2_ABBREV_TO_ACTION = {
   "SECO-2": "seco2",
   "SES-3": "relight",
   "SECO-3": "relight",
+"Booster Boostback Burn Startup": "boostback_start",
+"Booster Boostback Burn Shutdown": "boostback_end",
+"Orbital Insertion Burn Start": "relight",
+"Orbital Insertion Burn End": "seco2",
+"Deorbit Burn Start": "ses2",
+"Atmospheric Entry": "entry",
+"Starship Landing Burn": "landing_burn_ship",
+"Starship Landing": "ship_splash",
   // Payload Separation handled specially (first/last only) — see mapTimeline
 };
 
@@ -227,8 +235,11 @@ function mapTimeline(timeline, opts = {}) {
       continue;
     }
 
-    if (String(abbrev).toLowerCase().includes("payload separation") ||
-        String(abbrev) === "Payload Separation") {
+const abbrevNorm = String(abbrev).toLowerCase();
+if (
+  abbrevNorm.includes("payload separation") ||
+  abbrevNorm.includes("payload deployment")
+) {
       payloadRows.push({ sec, label: label || "Payload Separation" });
       continue;
     }
