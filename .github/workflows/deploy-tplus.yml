@@ -26,6 +26,7 @@ on:
       - "packages/cue/src/engine/gate.js"
       - "packages/cue/src/engine/types.js"
       - "packages/cue/src/telegram-inbox.js"
+      - "packages/cue/src/public-feed.js"
       - "packages/cue/package.json"
       - "package.json"
       - "package-lock.json"

@@ -21,6 +21,7 @@ on:
     paths:
       - "apps/gridwhisper/**"
       - "packages/cue/src/telegram-inbox.js"
+      - "packages/cue/src/public-feed.js"
       - "packages/cue/package.json"
       - "package.json"
       - "package-lock.json"
