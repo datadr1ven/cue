@@ -1,6 +1,10 @@
 /**
  * Open a manual X compose draft (intent URL) + local review page.
  * Prefills text; collage still needs drag/paste into the composer.
+ *
+ * Termux/Android: only open the review page — auto-opening X right after
+ * steals the foreground and the HTML viewer never sticks. User taps
+ * “Open draft on X” on the review page instead.
  */
 
 import { spawnSync } from "child_process";
@@ -8,12 +12,19 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
+function isTermux() {
+  return !!(
+    process.env.TERMUX_VERSION || existsSync("/data/data/com.termux")
+  );
+}
+
 /**
  * @param {{ caption: string, intentUrl: string, collagePath: string, postHtmlPath: string }} opts
  */
 export function openManualXDraft(opts) {
   const { caption, intentUrl, collagePath, postHtmlPath } = opts;
   const steps = [];
+  const termux = isTermux();
 
   const textCopy = copyTextBestEffort(caption);
   steps.push(textCopy.ok ? "caption → clipboard" : "caption clipboard skipped");
@@ -32,29 +43,75 @@ export function openManualXDraft(opts) {
 
   // Review page first so the collage is visible for drag-drop
   if (postHtmlPath && existsSync(postHtmlPath)) {
-    openPath(postHtmlPath);
-    steps.push(`opened ${postHtmlPath}`);
+    const opened = openPath(postHtmlPath);
+    if (opened.ok) {
+      steps.push(`opened review (${opened.via})`);
+    } else {
+      steps.push(
+        `review open failed — try: termux-open '${postHtmlPath}'`,
+      );
+    }
+  } else {
+    steps.push("no review page on disk");
   }
 
-  openPath(intentUrl);
-  steps.push(`opened X compose intent`);
+  if (termux) {
+    // Opening https://x.com/intent/... immediately covers/cancels the HTML
+    // viewer on Android. Leave X to the review page CTA.
+    steps.push(
+      'X not auto-opened on Termux — tap “Open draft on X” on the review page',
+    );
+  } else {
+    const opened = openPath(intentUrl);
+    steps.push(
+      opened.ok
+        ? `opened X compose (${opened.via})`
+        : "X compose open failed",
+    );
+  }
 
-  return { ok: true, steps, intentUrl, textCopy, imgCopy };
+  return { ok: true, steps, intentUrl, textCopy, imgCopy, termux };
 }
 
+/**
+ * @param {string} target
+ * @returns {{ ok: boolean, via?: string, status?: number|null }}
+ */
 function openPath(target) {
-  // Termux: termux-open-url for https; termux-open for files
-  if (process.env.TERMUX_VERSION || existsSync("/data/data/com.termux")) {
+  if (isTermux()) {
     if (/^https?:\/\//i.test(target)) {
-      spawnSync("termux-open-url", [target], {
+      const r = spawnSync("termux-open-url", [target], {
         detached: true,
         stdio: "ignore",
       });
-      return;
+      return {
+        ok: !r.error && (r.status === 0 || r.status == null),
+        via: "termux-open-url",
+        status: r.status,
+      };
     }
-    spawnSync("termux-open", [target], { detached: true, stdio: "ignore" });
-    return;
+    // Local file: termux-open (FileProvider). Fallback file:// URL.
+    let r = spawnSync("termux-open", [target], {
+      detached: true,
+      stdio: "ignore",
+    });
+    if (!r.error && (r.status === 0 || r.status == null)) {
+      return { ok: true, via: "termux-open", status: r.status };
+    }
+    const fileUrl = target.startsWith("file:")
+      ? target
+      : `file://${target}`;
+    r = spawnSync("termux-open-url", [fileUrl], {
+      detached: true,
+      stdio: "ignore",
+    });
+    return {
+      ok: !r.error && (r.status === 0 || r.status == null),
+      via: "termux-open-url/file",
+      status: r.status,
+    };
   }
+
   const opener =
     process.env.BROWSER_OPEN ||
     (process.platform === "darwin"
@@ -64,11 +121,25 @@ function openPath(target) {
         : "xdg-open");
   const args =
     process.platform === "win32" ? ["/c", "start", "", target] : [target];
-  spawnSync(opener, args, { detached: true, stdio: "ignore" });
+  const r = spawnSync(opener, args, { detached: true, stdio: "ignore" });
+  return {
+    ok: !r.error && (r.status === 0 || r.status == null),
+    via: opener,
+    status: r.status,
+  };
 }
 
 function copyTextBestEffort(text) {
   const payload = String(text || "");
+  if (isTermux()) {
+    const r = spawnSync("termux-clipboard-set", [], {
+      input: payload,
+      encoding: "utf8",
+    });
+    if (!r.error && r.status === 0) {
+      return { ok: true, via: "termux-clipboard-set" };
+    }
+  }
   // wl-copy
   let r = spawnSync("wl-copy", [], { input: payload, encoding: "utf8" });
   if (r.status === 0) return { ok: true, via: "wl-copy" };

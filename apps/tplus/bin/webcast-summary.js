@@ -170,9 +170,15 @@ async function main() {
       postHtmlPath: result.postHtmlPath,
     });
     console.log(`open-draft: ${opened.steps.join(" · ")}`);
-    console.log(
-      "Glance the draft on X, attach collage if present, then Post.",
-    );
+    if (opened.termux) {
+      console.log(
+        "Termux: use the review page → “Open draft on X”. Caption should be on the clipboard (termux-api).",
+      );
+    } else {
+      console.log(
+        "Glance the draft on X, attach collage if present, then Post.",
+      );
+    }
   }
 
   if (args.post) {
