@@ -91,6 +91,7 @@ function expandSessionInfo(payload, base, merge) {
         session_name: payload.Name || payload.Type || null,
         session_type: payload.Type || null,
         date_start: payload.StartDate || null,
+        meeting_key: meeting.Key ?? meeting.key ?? null,
         circuit_short_name: meeting.Circuit?.ShortName || meeting.Location || null,
         location: meeting.Location || null,
         country_name: meeting.Country?.Name || null,

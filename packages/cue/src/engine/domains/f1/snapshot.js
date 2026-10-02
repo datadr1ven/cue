@@ -332,6 +332,10 @@ export function reduceF1(state, event, opts = {}) {
       break;
     }
     case "f1.sessions": {
+      // SignalR SessionInfo carries meeting + session on one topic; apply both.
+      // Otherwise meetingName can stick from a prior Path/team-radio parse
+      // (seen: Azerbaijan Race residual → FP1 banners before hub flipped).
+      applyMeetingPayload(next, p);
       applySessionsMeta(next, p);
       break;
     }
