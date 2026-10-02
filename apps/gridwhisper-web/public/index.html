@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GridWhisper — Race moments, as they happen</title>
+    <meta
+      name="description"
+      content="F1 race moments as they happen — safety cars, retirements, pits, lead changes. Watch here, or get them on your phone."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>"
+    />
+    <meta property="og:title" content="GridWhisper — Race moments, as they happen" />
+    <meta
+      property="og:description"
+      content="Watch F1 race moments live. Optional alerts on your phone via Telegram."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">🏎️</span>
+          <span class="brand-name">GridWhisper</span>
+        </a>
+        <div class="top-actions">
+          <button
+            type="button"
+            class="help-btn"
+            id="helpOpen"
+            aria-label="What is GridWhisper?"
+            title="What is GridWhisper?"
+          >
+            ?
+          </button>
+          <a
+            class="cta"
+            href="https://t.me/GridWhisperBot?start=web"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Get on your phone</a
+          >
+        </div>
+      </header>
+
+      <p class="banner">Race moments, as they happen</p>
+
+      <div class="live-status" id="status">
+        <span class="live-dot" id="dot"></span>
+        <span id="statusText">Connecting…</span>
+      </div>
+
+      <section class="feed-shell" aria-label="Race alerts">
+        <div class="bubbles" id="feed">
+          <div class="empty">Loading…</div>
+        </div>
+      </section>
+
+      <footer>
+        <p>
+          Unofficial · Not affiliated with Formula 1, the FIA, or Formula One
+          Group.
+        </p>
+        <p>
+          <a
+            href="https://github.com/datadr1ven/cue"
+            target="_blank"
+            rel="noopener noreferrer"
+            >github.com/datadr1ven/cue</a
+          >
+          ·
+          <a
+            href="https://buymeacoffee.com/datadr1ven"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Buy Me a Coffee</a
+          >
+        </p>
+      </footer>
+    </div>
+
+    <dialog class="help-dialog" id="helpDialog">
+      <form method="dialog" class="help-panel">
+        <header class="help-head">
+          <h2>What is GridWhisper?</h2>
+          <button type="submit" class="help-close" aria-label="Close">×</button>
+        </header>
+        <div class="help-body">
+          <p>
+            <strong>GridWhisper</strong> follows live F1 timing and posts the
+            moments that matter — race start, safety cars, retirements, pit
+            stops, lead changes — when they happen.
+          </p>
+          <p>
+            This page is a live feed of those moments. No account needed to
+            watch.
+          </p>
+          <p>
+            Want the same alerts on your phone? Tap
+            <strong>Get on your phone</strong> to open the Telegram bot and press
+            Start. Quiet between moments; <code>/stop</code> anytime.
+          </p>
+          <p>
+            Live timing can lag and ordering can be imperfect. Unofficial fan
+            project — not affiliated with Formula 1, the FIA, or Formula One
+            Group.
+          </p>
+        </div>
+        <footer class="help-foot">
+          <button type="submit" class="cta help-done">Got it</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script>
+      const FEED_URL =
+        "https://gridwhisper.scenicminddigital.workers.dev/recent?limit=40";
+      const NEXT_URL =
+        "https://gridwhisper.scenicminddigital.workers.dev/next";
+      const POLL_MS = 8000;
+      const NEXT_POLL_MS = 60000;
+      const feedEl = document.getElementById("feed");
+      const statusText = document.getElementById("statusText");
+      const dot = document.getElementById("dot");
+      const helpDialog = document.getElementById("helpDialog");
+      let nextEvent = null;
+      let feedOk = false;
+      let feedCount = 0;
+      document.getElementById("helpOpen").addEventListener("click", () => {
+        helpDialog.showModal();
+      });
+
+      function esc(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function formatWhen(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        const sameDay =
+          d.toDateString() === new Date().toDateString();
+        if (sameDay) {
+          return d.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          });
+        }
+        return d.toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+
+      function formatRel(iso) {
+        const ms = Date.parse(iso);
+        if (!Number.isFinite(ms)) return "";
+        const delta = ms - Date.now();
+        if (delta < -60_000) return "";
+        if (delta < 60_000) return "soon";
+        const m = Math.round(delta / 60_000);
+        if (m < 60) return `in ${m}m`;
+        const h = Math.floor(m / 60);
+        const rem = m % 60;
+        if (h < 48) return rem ? `in ${h}h ${rem}m` : `in ${h}h`;
+        return `in ~${Math.round(h / 24)}d`;
+      }
+
+      function shortSession(n) {
+        const key = String(n.key || "").toLowerCase();
+        if (key === "fp1") return "FP1";
+        if (key === "fp2") return "FP2";
+        if (key === "fp3") return "FP3";
+        if (key === "quali") return "Quali";
+        if (key === "sprint") return "Sprint";
+        if (key === "race") return "Race";
+        return n.sessionName || "Session";
+      }
+
+      function statusFromNext() {
+        const n = nextEvent;
+        if (!n) return "Waiting for the next session";
+        const label = shortSession(n);
+        const where = n.circuit ? ` · ${n.circuit}` : "";
+        if (n.live) return `Live · ${label}${where}`;
+        const rel = formatRel(n.dateStart);
+        return rel
+          ? `Next: ${label}${where} · ${rel}`
+          : `Next: ${label}${where}`;
+      }
+
+      function updateStatus() {
+        if (!feedOk) {
+          statusText.textContent = "Feed unreachable — retrying…";
+          return;
+        }
+        // Prefer next/live plan when present; else feed activity or waiting copy
+        if (nextEvent) {
+          statusText.textContent = statusFromNext();
+          return;
+        }
+        statusText.textContent = feedCount
+          ? "Updates every few seconds"
+          : "Waiting for the next session";
+      }
+
+      function render(items) {
+        if (!items.length) {
+          feedEl.innerHTML =
+            '<div class="empty">No alerts yet. Check back during a session.</div>';
+          return;
+        }
+        feedEl.innerHTML = items
+          .slice()
+          .reverse()
+          .map((it) => {
+            const when = formatWhen(it.t);
+            const img =
+              it.imageUrl && /^https:\/\//i.test(it.imageUrl)
+                ? `<img class="bubble-img" src="${esc(it.imageUrl)}" alt="" loading="lazy" />`
+                : "";
+            return `<div class="bubble">${img}<div class="bubble-text">${esc(it.text)}</div><span class="dim">${esc(when)}</span></div>`;
+          })
+          .join("");
+      }
+
+      async function pollFeed() {
+        try {
+          const res = await fetch(FEED_URL, { cache: "no-store" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          const items = Array.isArray(data.items) ? data.items : [];
+          render(items);
+          feedOk = true;
+          feedCount = items.length;
+          dot.classList.add("on");
+          updateStatus();
+        } catch (e) {
+          feedOk = false;
+          dot.classList.remove("on");
+          updateStatus();
+        }
+      }
+
+      async function pollNext() {
+        try {
+          const res = await fetch(NEXT_URL, { cache: "no-store" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          nextEvent = data && data.next ? data.next : null;
+        } catch (e) {
+          /* keep last nextEvent */
+        }
+        updateStatus();
+      }
+
+      pollFeed();
+      pollNext();
+      setInterval(pollFeed, POLL_MS);
+      setInterval(pollNext, NEXT_POLL_MS);
+    </script>
+  </body>
+</html>

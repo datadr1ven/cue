@@ -1,0 +1,14 @@
+{
+  "name": "tplus-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TPlus landing + live feed (Cloudflare Pages)",
+  "license": "MIT",
+  "scripts": {
+    "preview": "wrangler pages dev public --port 8791",
+    "cf:deploy": "wrangler pages deploy public --project-name=t-plus --commit-dirty=true"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

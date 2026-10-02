@@ -35,6 +35,7 @@
     "webcast:schedule": "npm run webcast:schedule -w tplus --",
     "webcast:live": "npm run webcast:live -w tplus --",
     "webcast:listen": "npm run webcast:listen -w tplus --",
+    "webcast:summary": "npm run webcast:summary -w tplus --",
     "schedule:tplus": "npm run schedule:tplus -w tplus --",
     "schedule:gridwhisper": "npm run schedule:gridwhisper -w gridwhisper --",
     "smoke:webcast": "npm run smoke:webcast -w tplus",
@@ -44,6 +45,10 @@
     "smoke:inbox": "npm run smoke:inbox -w gridwhisper",
     "cf:deploy:tplus": "npm run cf:deploy -w tplus --",
     "cf:deploy:gridwhisper": "npm run cf:deploy -w gridwhisper --",
+    "cf:deploy:gridwhisper-web": "npm run cf:deploy -w gridwhisper-web --",
+    "cf:deploy:tplus-web": "npm run cf:deploy -w tplus-web --",
+    "web:preview:gridwhisper": "npm run preview -w gridwhisper-web --",
+    "web:preview:tplus": "npm run preview -w tplus-web --",
     "cf:dev:tplus": "npm run cf:dev -w tplus --",
     "cf:dev:gridwhisper": "npm run cf:dev -w gridwhisper --"
   },

@@ -17,6 +17,8 @@ This repository is an **npm workspaces** monorepo:
 | **cue** (core) | [`packages/cue`](./packages/cue/) | Pipeline, gate, domains (`f1`, `starship`), offline replay |
 | **GridWhisper** | [`apps/gridwhisper`](./apps/gridwhisper/) | F1 product — OpenF1 MQTT + CF enroll/`/deliver` |
 | **TPlus** | [`apps/tplus`](./apps/tplus/) | Launch product — missions, webcast:live, CF enroll/`/suggest` |
+| **gridwhisper-web** | [`apps/gridwhisper-web`](./apps/gridwhisper-web/) | GridWhisper race feed + phone CTA ([gridwhisper.pages.dev](https://gridwhisper.pages.dev/)) |
+| **tplus-web** | [`apps/tplus-web`](./apps/tplus-web/) | TPlus alert feed + phone CTA ([t-plus.pages.dev](https://t-plus.pages.dev/)) |
 
 Architecture notes: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 

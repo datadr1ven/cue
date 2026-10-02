@@ -1,0 +1,51 @@
+# Deploy GridWhisper landing (Cloudflare Pages) when gridwhisper-web changes.
+
+name: Deploy gridwhisper-web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/gridwhisper-web/**"
+      - ".github/workflows/deploy-gridwhisper-web.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gridwhisper-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Check GitHub secrets present
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::Missing repository secret CLOUDFLARE_API_TOKEN"
+            exit 1
+          fi
+          if [ "$HAS_ACCOUNT" != "true" ]; then
+            echo "::error::Missing repository secret CLOUDFLARE_ACCOUNT_ID"
+            exit 1
+          fi
+
+      - name: Deploy Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run cf:deploy:gridwhisper-web
