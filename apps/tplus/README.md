@@ -18,10 +18,24 @@ npm run webcast:live -- --mission o3b-mpower-f --mode test
 npm run cf:deploy:tplus
 ```
 
+## End-of-flight summary (collage + optional X)
+
+```bash
+# Laptop / Termux / anywhere with network (uses public feed):
+npm run webcast:summary -- --from-feed --open
+
+# Desktop with local run frames:
+npm run webcast:summary -- --latest --open
+```
+
+Manual flow details: [docs/x-posting.md](./docs/x-posting.md).
+
 ## Docs
 
 - [Cloudflare](./docs/cloudflare.md)  
 - [Webcast consumer](./src/webcast/README.md)  
+- [X posting](./docs/x-posting.md)  
+
 
 ## Layout
 

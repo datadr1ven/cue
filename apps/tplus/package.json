@@ -12,6 +12,7 @@
     "webcast:schedule": "node bin/webcast-schedule.js",
     "webcast:live": "node bin/webcast-live.js",
     "webcast:listen": "node bin/webcast-listen.js",
+    "webcast:summary": "node bin/webcast-summary.js",
     "smoke:webcast": "node bin/smoke-webcast.js",
     "smoke:ll2": "node bin/smoke-ll2.js",
     "schedule:tplus": "node bin/schedule-from-ll2.js",

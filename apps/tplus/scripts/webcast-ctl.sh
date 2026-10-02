@@ -209,6 +209,18 @@ cmd_stop() {
   fi
   rm -f "$pf"
   echo "[$mission] stopped"
+  # Optional: build collage + caption from newest run (dry-run X unless ENABLED + --post)
+  if [[ "${TPLUS_SUMMARY_ON_STOP:-0}" == "1" ]]; then
+    # --open prefills an X draft in the browser when a display is available
+    local open_flag=()
+    if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+      open_flag=(--open)
+    fi
+    echo "[$mission] webcast:summary --latest ${open_flag[*]}"
+    (
+      cd "$CUE_ROOT" && npm run webcast:summary -w tplus -- --latest "${open_flag[@]}"
+    ) || echo "[$mission] summary failed (non-fatal)"
+  fi
   echo "=== STOP done $mission ==="
 }
 
