@@ -41,6 +41,17 @@ import {
   parseReplyArgs,
   resolveInboxTarget,
 } from "cue/telegram-inbox.js";
+import {
+  FEED_IMG_KV_PREFIX,
+  FEED_IMG_MAX_BYTES,
+  FEED_KV_KEY,
+  FEED_SHOW,
+  appendFeed,
+  feedCorsHeaders,
+  feedCorsOrigin,
+  feedEntry,
+  normalizeFeed,
+} from "cue/public-feed.js";
 
 const KV_USERS = "users:v1";
 /** Desktop schedule-from-ll2 snapshot for /nextlaunch(es) */
@@ -243,10 +254,57 @@ function normalizeArtifacts(raw) {
       kind: a.kind === "voice" || a.kind === "audio" ? "voice" : "photo",
       label: String(a.label || a.id || `artifact ${i}`).slice(0, 40),
       fileId: a.fileId != null ? String(a.fileId) : null,
+      // Optional public HTTPS URL (desktop may host frames elsewhere)
+      url:
+        a.url != null && /^https:\/\//i.test(String(a.url))
+          ? String(a.url).slice(0, 500)
+          : null,
       // defaultOn false → skip unless explicitly selected (legacy)
       include: a.defaultOn !== false && a.selected !== false,
     }))
-    .filter((a) => a.fileId && a.include);
+    .filter((a) => (a.fileId || a.url) && a.include);
+}
+
+/**
+ * Download a Telegram photo via getFile (server-side; never expose token URLs)
+ * and store bytes in KV for public GET /media/:id.
+ * @returns {Promise<string|null>} media id
+ */
+async function rehostTelegramPhoto(env, kv, fileId) {
+  if (!fileId || !env.TELEGRAM_TOKEN) return null;
+  try {
+    const metaRes = await fetch(
+      `https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`,
+    );
+    const meta = await metaRes.json().catch(() => ({}));
+    const filePath = meta?.result?.file_path;
+    if (!filePath) {
+      console.error("getFile missing path", meta);
+      return null;
+    }
+    const fileRes = await fetch(
+      `https://api.telegram.org/file/bot${env.TELEGRAM_TOKEN}/${filePath}`,
+    );
+    if (!fileRes.ok) {
+      console.error("telegram file download", fileRes.status);
+      return null;
+    }
+    const buf = await fileRes.arrayBuffer();
+    if (!buf.byteLength || buf.byteLength > FEED_IMG_MAX_BYTES) {
+      console.error("feed image size skip", buf.byteLength);
+      return null;
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const contentType =
+      fileRes.headers.get("content-type") || "image/jpeg";
+    await kv.put(`${FEED_IMG_KV_PREFIX}${id}`, buf, {
+      metadata: { contentType },
+    });
+    return id;
+  } catch (e) {
+    console.error("rehostTelegramPhoto", e);
+    return null;
+  }
 }
 
 /**
@@ -330,6 +388,49 @@ async function handleSuggestPost(request, env, kv) {
     mode === "test" ? admins : await subscriberIds(kv, env);
   const n = await fanOutTo(env, audience, alertText, { artifacts });
 
+  // Public read-only feed for Pages /live — ops only (no 🧪 TEST)
+  if (mode === "ops" && alertText) {
+    try {
+      let imageUrl = null;
+      const bodyUrl =
+        body?.imageUrl != null && /^https:\/\//i.test(String(body.imageUrl))
+          ? String(body.imageUrl).slice(0, 500)
+          : null;
+      const artUrl = artifacts.find((a) => a.url)?.url || null;
+      if (bodyUrl || artUrl) {
+        imageUrl = bodyUrl || artUrl;
+      } else {
+        const photoId =
+          artifacts.find((a) => a.kind === "photo" && a.fileId)?.fileId ||
+          null;
+        if (photoId) {
+          const mediaId = await rehostTelegramPhoto(env, kv, photoId);
+          if (mediaId) {
+            const origin = new URL(request.url).origin;
+            imageUrl = `${origin}/media/${mediaId}`;
+          }
+        }
+      }
+
+      const prev = await kvGetJson(kv, FEED_KV_KEY, null);
+      const next = appendFeed(
+        prev,
+        feedEntry({
+          text: alertText,
+          source: "suggest",
+          actionId: actionId || null,
+          missionName: body?.missionName
+            ? String(body.missionName)
+            : null,
+          imageUrl,
+        }),
+      );
+      await kvPutJson(kv, FEED_KV_KEY, next);
+    } catch (e) {
+      console.error("feed append error", e);
+    }
+  }
+
   return Response.json({
     ok: true,
     mode,
@@ -338,6 +439,106 @@ async function handleSuggestPost(request, env, kv) {
     artifacts: artifacts.length,
     alertText,
   });
+}
+
+/**
+ * GET /media/:id — public rehosted still from an ops /suggest photo.
+ */
+async function handleMedia(env, kv, id) {
+  const key = `${FEED_IMG_KV_PREFIX}${id}`;
+  const got = await kv.getWithMetadata(key, { type: "arrayBuffer" });
+  if (!got?.value) {
+    return new Response("not found", { status: 404 });
+  }
+  const contentType =
+    (got.metadata && got.metadata.contentType) || "image/jpeg";
+  return new Response(got.value, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=86400",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+/**
+ * GET /recent — public alert feed for the landing /live page.
+ */
+async function handleRecent(request, env, kv) {
+  const url = new URL(request.url);
+  const limitRaw = Number(url.searchParams.get("limit") || FEED_SHOW);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(1, Math.floor(limitRaw)), 50)
+    : FEED_SHOW;
+  const feed = normalizeFeed(await kvGetJson(kv, FEED_KV_KEY, null));
+  const items = feed.items.slice(-limit);
+  const allowOrigin = feedCorsOrigin(env, request);
+  return Response.json(
+    {
+      product: "tplus",
+      updatedAt: feed.updatedAt,
+      items,
+    },
+    {
+      headers: {
+        ...feedCorsHeaders(allowOrigin),
+        "Cache-Control": "public, max-age=5",
+      },
+    },
+  );
+}
+
+/**
+ * Slim public next-event for Pages status line (from schedule:v1).
+ * @param {object|null} schedule
+ */
+function publicNextLaunch(schedule) {
+  const list = scheduleLaunches(schedule);
+  if (!list.length) return null;
+  const L = list[0];
+  const now = Date.now();
+  const netMs = Date.parse(L.net);
+  const endMs = L.windowEnd
+    ? Date.parse(L.windowEnd)
+    : Number.isFinite(netMs)
+      ? netMs + 2 * 3600_000
+      : NaN;
+  const live =
+    Number.isFinite(netMs) &&
+    Number.isFinite(endMs) &&
+    now >= netMs &&
+    now <= endMs;
+  return {
+    kind: "launch",
+    name: L.missionName || L.name || null,
+    lsp: L.lsp || null,
+    net: L.net || null,
+    windowEnd: L.windowEnd || null,
+    status: L.status || null,
+    live: !!live,
+  };
+}
+
+/**
+ * GET /next — public next launch for Pages (CORS, no secrets).
+ */
+async function handleNext(request, env, kv) {
+  const schedule = await kvGetJson(kv, KV_SCHEDULE, null);
+  const allowOrigin = feedCorsOrigin(env, request);
+  return Response.json(
+    {
+      product: "tplus",
+      generatedAt: schedule?.generatedAt || null,
+      next: publicNextLaunch(schedule),
+    },
+    {
+      headers: {
+        ...feedCorsHeaders(allowOrigin),
+        "Cache-Control": "public, max-age=30",
+      },
+    },
+  );
 }
 
 /**
@@ -448,8 +649,8 @@ async function sendNoteOrBroadcast(env, kv, chatId, kind, text, photoFileId) {
 
 function userHelp() {
   return (
-    `TPlus — sparse launch alerts\n\n` +
-    `High-signal milestones from the live webcast worker (test or ops mode).\n\n` +
+    `TPlus — launch alerts\n\n` +
+    `Milestones from the live webcast (test or ops mode).\n\n` +
     `/start — subscribe\n` +
     `/nextlaunch — next planned webcast\n` +
     `/nextlaunches — upcoming launches on the plan\n` +
@@ -504,6 +705,29 @@ function formatLaunchLine(L, i = null) {
   return `${prefix}${name}${lsp}\n   NET ${net}${webcast}`;
 }
 
+/** Compact T+ milestone list for /nextlaunch (Telegram message budget). */
+function formatMilestonesBlock(L, limit = 12) {
+  const rows = Array.isArray(L?.milestones) ? L.milestones : [];
+  if (!rows.length) {
+    if (L?.timelineEvents === 0) {
+      return `\n\nTimeline: LL2 has no T+ events yet (liftoff-only until filled).`;
+    }
+    return "";
+  }
+  const shown = rows.slice(0, limit);
+  const lines = shown.map((r) => {
+    const t =
+      r.tPlusSec != null && Number.isFinite(Number(r.tPlusSec))
+        ? `T+${formatTPlus(Number(r.tPlusSec))}`
+        : "T+—";
+    const label = r.label || r.actionId || "Event";
+    return `  ${t}  ${label}`;
+  });
+  const more =
+    rows.length > shown.length ? `\n  … +${rows.length - shown.length} more` : "";
+  return `\n\nMission timeline\n${lines.join("\n")}${more}`;
+}
+
 function formatNextLaunch(schedule) {
   const list = scheduleLaunches(schedule);
   if (!list.length) {
@@ -520,7 +744,7 @@ function formatNextLaunch(schedule) {
   const updated = schedule?.generatedAt
     ? `\n\nPlan as of ${schedule.generatedAt}`
     : "";
-  return `Next launch\n\n${formatLaunchLine(L)}${updated}`;
+  return `Next launch\n\n${formatLaunchLine(L)}${formatMilestonesBlock(L)}${updated}`;
 }
 
 function formatNextLaunches(schedule, limit = 8) {
@@ -566,6 +790,14 @@ async function handleScheduleCachePost(request, env, kv) {
       windowEnd: L.windowEnd || null,
       webcastUrl: L.webcastUrl || null,
       status: L.status || null,
+      timelineEvents: L.timelineEvents ?? null,
+      milestones: Array.isArray(L.milestones)
+        ? L.milestones.slice(0, 24).map((m) => ({
+            tPlusSec: m.tPlusSec != null ? Number(m.tPlusSec) : null,
+            actionId: m.actionId != null ? String(m.actionId) : null,
+            label: m.label != null ? String(m.label) : null,
+          }))
+        : [],
     })),
   };
   await kvPutJson(kv, KV_SCHEDULE, slim);
@@ -1049,6 +1281,52 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/") {
       return new Response("TPlus worker ok", { status: 200 });
+    }
+
+    if (url.pathname === "/recent" || url.pathname === "/feed") {
+      if (request.method === "OPTIONS") {
+        const allowOrigin = feedCorsOrigin(env, request);
+        return new Response(null, {
+          status: 204,
+          headers: feedCorsHeaders(allowOrigin),
+        });
+      }
+      if (request.method === "GET") {
+        try {
+          return await handleRecent(request, env, env.TPLUS_KV);
+        } catch (e) {
+          console.error("recent error", e);
+          return new Response("error", { status: 500 });
+        }
+      }
+    }
+
+    if (url.pathname === "/next") {
+      if (request.method === "OPTIONS") {
+        const allowOrigin = feedCorsOrigin(env, request);
+        return new Response(null, {
+          status: 204,
+          headers: feedCorsHeaders(allowOrigin),
+        });
+      }
+      if (request.method === "GET") {
+        try {
+          return await handleNext(request, env, env.TPLUS_KV);
+        } catch (e) {
+          console.error("next error", e);
+          return new Response("error", { status: 500 });
+        }
+      }
+    }
+
+    const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9_-]+)$/);
+    if (mediaMatch && request.method === "GET") {
+      try {
+        return await handleMedia(env, env.TPLUS_KV, mediaMatch[1]);
+      } catch (e) {
+        console.error("media error", e);
+        return new Response("error", { status: 500 });
+      }
     }
 
     // Desktop webcast → immediate fan-out

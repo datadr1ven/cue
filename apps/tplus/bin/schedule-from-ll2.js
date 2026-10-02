@@ -17,7 +17,11 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import "cue/config.js";
-import { ll2Fetch, pickOfficialWebcastUrl } from "../src/missions/ll2.js";
+import {
+  launchToScriptDoc,
+  ll2Fetch,
+  pickOfficialWebcastUrl,
+} from "../src/missions/ll2.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(ROOT, "../..");
@@ -143,6 +147,25 @@ function considerLaunch(launch, now, horizonH) {
     reasons.push("empty timeline — T+0 liftoff only");
   }
 
+  // Map LL2 timeline → fireable T+ milestones (same path as webcast:live)
+  let milestones = [];
+  try {
+    const { scriptDoc } = launchToScriptDoc(launch, {
+      officialOnly: true,
+      requireWebcast: false,
+    });
+    milestones = (scriptDoc.script || [])
+      .filter((r) => r && r.tPlusSec != null && r.actionId)
+      .map((r) => ({
+        tPlusSec: Number(r.tPlusSec),
+        actionId: String(r.actionId),
+        label: String(r.label || r.actionId),
+      }))
+      .slice(0, 24);
+  } catch (e) {
+    reasons.push(`timeline map failed: ${e.message || e}`);
+  }
+
   const startAt = addMinutes(net, -LEAD_MIN);
   const stopAt = addMinutes(windowEnd, TRAIL_MIN);
   if (stopAt <= startAt) {
@@ -163,6 +186,7 @@ function considerLaunch(launch, now, horizonH) {
       windowEnd: windowEnd.toISOString(),
       webcastUrl,
       timelineEvents: timeline.length,
+      milestones,
       runKey: runKeyForId(launch.id),
       startAt: startAt.toISOString(),
       stopAt: stopAt.toISOString(),

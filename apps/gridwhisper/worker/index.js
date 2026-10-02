@@ -5,12 +5,13 @@
  * Admins (TELEGRAM_ADMIN_IDS): /note · /broadcast · /inbox · /reply
  * Free-text from users → KV inbox (digest-coalesce admin ping).
  * Race-day MQTT (laptop) POSTs alerts to POST /deliver; this worker fans out.
+ * Schedule cache: desktop schedule-from-openf1 → POST /schedule-cache → KV.
  *
  * Bindings (wrangler.gridwhisper.toml):
  *   KV  GRIDWHISPER_KV
  * Secrets:
  *   TELEGRAM_TOKEN
- *   DELIVER_SECRET        (Bearer for /deliver)
+ *   DELIVER_SECRET        (Bearer for /deliver and /schedule-cache)
  *   TELEGRAM_ADMIN_IDS    (comma-separated; required for ops)
  * Vars:
  *   ENROLL_OPEN=true
@@ -33,11 +34,31 @@ import {
   parseReplyArgs,
   resolveInboxTarget,
 } from "cue/telegram-inbox.js";
+import {
+  FEED_KV_KEY,
+  FEED_SHOW,
+  appendFeed,
+  feedCorsHeaders,
+  feedCorsOrigin,
+  feedEntry,
+  normalizeFeed,
+} from "cue/public-feed.js";
 
 const KV_USERS = "users:v1";
+/** Desktop schedule-from-openf1 snapshot for GET /next */
+const KV_SCHEDULE = "schedule:v1";
 
 /** Once per isolate */
 let commandsRegistered = false;
+
+function deliverSecretOk(env, request) {
+  const secret = env.DELIVER_SECRET;
+  if (!secret) return false;
+  const auth = request.headers.get("Authorization") || "";
+  const headerSecret = request.headers.get("X-Deliver-Secret") || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  return bearer === secret || headerSecret === secret;
+}
 
 function parseAdminIds(env) {
   const raw = env.TELEGRAM_ADMIN_IDS || env.TELEGRAM_ALLOWLIST || "";
@@ -467,14 +488,10 @@ async function handleMessage(env, kv, message) {
  * Body: { "text": "…" }  optional photoFileId
  */
 async function handleDeliver(request, env, kv) {
-  const secret = env.DELIVER_SECRET;
-  if (!secret) {
+  if (!env.DELIVER_SECRET) {
     return new Response("DELIVER_SECRET not configured", { status: 500 });
   }
-  const auth = request.headers.get("Authorization") || "";
-  const headerSecret = request.headers.get("X-Deliver-Secret") || "";
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (bearer !== secret && headerSecret !== secret) {
+  if (!deliverSecretOk(env, request)) {
     return new Response("unauthorized", { status: 401 });
   }
 
@@ -494,10 +511,165 @@ async function handleDeliver(request, env, kv) {
   const result = await fanOut(env, kv, text || "📷", {
     photoFileId,
   });
+
+  // Public read-only feed for Pages /live (moments from /deliver only)
+  if (text) {
+    try {
+      const prev = await kvGetJson(kv, FEED_KV_KEY, null);
+      const next = appendFeed(
+        prev,
+        feedEntry({ text, source: "deliver" }),
+      );
+      await kvPutJson(kv, FEED_KV_KEY, next);
+    } catch (e) {
+      console.error("feed append error", e);
+    }
+  }
+
   return Response.json({
     ok: true,
     delivered: result.n,
     total: result.total,
+  });
+}
+
+/**
+ * GET /recent — public sparse alert feed for the landing /live page.
+ */
+async function handleRecent(request, env, kv) {
+  const url = new URL(request.url);
+  const limitRaw = Number(url.searchParams.get("limit") || FEED_SHOW);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(1, Math.floor(limitRaw)), 50)
+    : FEED_SHOW;
+  const feed = normalizeFeed(await kvGetJson(kv, FEED_KV_KEY, null));
+  const items = feed.items.slice(-limit);
+  const allowOrigin = feedCorsOrigin(env, request);
+  return Response.json(
+    {
+      product: "gridwhisper",
+      updatedAt: feed.updatedAt,
+      items,
+    },
+    {
+      headers: {
+        ...feedCorsHeaders(allowOrigin),
+        "Cache-Control": "public, max-age=5",
+      },
+    },
+  );
+}
+
+/**
+ * @param {object|null} schedule
+ * @returns {object[]}
+ */
+function scheduleSessions(schedule) {
+  const list = Array.isArray(schedule?.sessions) ? schedule.sessions : [];
+  const now = Date.now();
+  return list
+    .filter((s) => {
+      if (!s?.dateStart) return false;
+      const end = Date.parse(s.dateEnd || s.dateStart);
+      // Keep until ~45m after official end (matches trail default)
+      return Number.isFinite(end) ? end + 45 * 60_000 > now : true;
+    })
+    .sort((a, b) => String(a.dateStart).localeCompare(String(b.dateStart)));
+}
+
+/**
+ * Slim public next-session for Pages status line.
+ * @param {object|null} schedule
+ */
+function publicNextSession(schedule) {
+  const list = scheduleSessions(schedule);
+  if (!list.length) return null;
+  const s = list[0];
+  const now = Date.now();
+  const startMs = Date.parse(s.dateStart);
+  const endMs = Date.parse(s.dateEnd || s.dateStart);
+  const live =
+    Number.isFinite(startMs) &&
+    Number.isFinite(endMs) &&
+    now >= startMs &&
+    now <= endMs;
+  return {
+    kind: "session",
+    key: s.key || null,
+    sessionName: s.sessionName || null,
+    circuit: s.circuit || null,
+    country: s.country || null,
+    dateStart: s.dateStart || null,
+    dateEnd: s.dateEnd || null,
+    live: !!live,
+  };
+}
+
+/**
+ * GET /next — public next session for Pages (CORS, no secrets).
+ */
+async function handleNext(request, env, kv) {
+  const schedule = await kvGetJson(kv, KV_SCHEDULE, null);
+  const allowOrigin = feedCorsOrigin(env, request);
+  return Response.json(
+    {
+      product: "gridwhisper",
+      generatedAt: schedule?.generatedAt || null,
+      next: publicNextSession(schedule),
+    },
+    {
+      headers: {
+        ...feedCorsHeaders(allowOrigin),
+        "Cache-Control": "public, max-age=30",
+      },
+    },
+  );
+}
+
+/**
+ * Desktop schedule-from-openf1 → cache for GET /next.
+ * Auth: same Bearer as /deliver.
+ */
+async function handleScheduleCachePost(request, env, kv) {
+  if (!env.DELIVER_SECRET) {
+    return new Response("DELIVER_SECRET not configured", { status: 500 });
+  }
+  if (!deliverSecretOk(env, request)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response("bad json", { status: 400 });
+  }
+  if (!body || typeof body !== "object") {
+    return new Response("need schedule object", { status: 400 });
+  }
+  const sessions = Array.isArray(body.sessions) ? body.sessions : [];
+  const slim = {
+    generatedAt: body.generatedAt || new Date().toISOString(),
+    pushedAt: new Date().toISOString(),
+    horizonH: body.horizonH ?? null,
+    leadMin: body.leadMin ?? null,
+    trailMin: body.trailMin ?? null,
+    sessions: sessions.slice(0, 24).map((s) => ({
+      key: s.key || null,
+      sessionName: s.sessionName || null,
+      sessionType: s.sessionType || null,
+      sessionKey: s.sessionKey ?? null,
+      meetingKey: s.meetingKey ?? null,
+      country: s.country || null,
+      circuit: s.circuit || null,
+      dateStart: s.dateStart || null,
+      dateEnd: s.dateEnd || null,
+    })),
+  };
+  await kvPutJson(kv, KV_SCHEDULE, slim);
+  return Response.json({
+    ok: true,
+    stored: slim.sessions.length,
+    generatedAt: slim.generatedAt,
   });
 }
 
@@ -515,6 +687,60 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/") {
       return new Response("GridWhisper worker ok", { status: 200 });
+    }
+
+    if (url.pathname === "/recent" || url.pathname === "/feed") {
+      if (request.method === "OPTIONS") {
+        const allowOrigin = feedCorsOrigin(env, request);
+        return new Response(null, {
+          status: 204,
+          headers: feedCorsHeaders(allowOrigin),
+        });
+      }
+      if (request.method === "GET") {
+        try {
+          return await handleRecent(request, env, kv);
+        } catch (e) {
+          console.error("recent error", e);
+          return new Response("error", { status: 500 });
+        }
+      }
+    }
+
+    if (url.pathname === "/next") {
+      if (request.method === "OPTIONS") {
+        const allowOrigin = feedCorsOrigin(env, request);
+        return new Response(null, {
+          status: 204,
+          headers: feedCorsHeaders(allowOrigin),
+        });
+      }
+      if (request.method === "GET") {
+        try {
+          return await handleNext(request, env, kv);
+        } catch (e) {
+          console.error("next error", e);
+          return new Response("error", { status: 500 });
+        }
+      }
+    }
+
+    // Desktop schedule-from-openf1 → KV for GET /next
+    if (request.method === "POST" && url.pathname === "/schedule-cache") {
+      try {
+        return await handleScheduleCachePost(request, env, kv);
+      } catch (e) {
+        console.error("schedule-cache error", e);
+        return new Response("error", { status: 500 });
+      }
+    }
+
+    if (request.method === "GET" && url.pathname === "/schedule-cache") {
+      if (!deliverSecretOk(env, request)) {
+        return new Response("unauthorized", { status: 401 });
+      }
+      const schedule = await kvGetJson(kv, KV_SCHEDULE, null);
+      return Response.json(schedule || { sessions: [] });
     }
 
     // Race-day alert inject

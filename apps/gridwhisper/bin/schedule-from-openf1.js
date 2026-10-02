@@ -340,6 +340,55 @@ async function main() {
     console.log("--- crontab block ---");
     console.log(block);
   }
+
+  // Push plan to CF Worker KV for GET /next (best-effort)
+  if (!args.dryRun) {
+    await pushScheduleCache(schedule);
+  }
+}
+
+/**
+ * POST schedule snapshot to CF Worker (same auth as /deliver).
+ * URL: GRIDWHISPER_SCHEDULE_URL or derive from DELIVER_URL (/deliver → /schedule-cache).
+ */
+async function pushScheduleCache(schedule) {
+  const secret = process.env.DELIVER_SECRET || "";
+  let url = process.env.GRIDWHISPER_SCHEDULE_URL || "";
+  if (!url) {
+    const deliver = process.env.DELIVER_URL || "";
+    if (deliver.includes("/deliver")) {
+      url = deliver.replace(/\/deliver\/?$/, "/schedule-cache");
+    } else if (deliver) {
+      url = deliver.replace(/\/$/, "") + "/schedule-cache";
+    }
+  }
+  if (!url || !secret) {
+    console.log(
+      "skip schedule-cache push (set DELIVER_URL + DELIVER_SECRET)",
+    );
+    return;
+  }
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${secret}`,
+        "X-Deliver-Secret": secret,
+      },
+      body: JSON.stringify(schedule),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      console.warn(
+        `schedule-cache push failed ${res.status}: ${text.slice(0, 200)}`,
+      );
+      return;
+    }
+    console.log(`schedule-cache pushed → ${url} (${text.slice(0, 120)})`);
+  } catch (e) {
+    console.warn(`schedule-cache push error: ${e.message || e}`);
+  }
 }
 
 main().catch((e) => {
