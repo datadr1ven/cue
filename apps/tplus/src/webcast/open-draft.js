@@ -8,14 +8,74 @@
  */
 
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
+import { homedir, tmpdir } from "os";
+import { basename, join } from "path";
 
 function isTermux() {
   return !!(
     process.env.TERMUX_VERSION || existsSync("/data/data/com.termux")
   );
+}
+
+/**
+ * Copy collage into shared storage and media-scan so it appears in Gallery /
+ * camera roll. Requires `termux-setup-storage` once.
+ * @param {string} collagePath
+ * @returns {{ ok: boolean, dest?: string, reason?: string, scanned?: boolean }}
+ */
+export function saveCollageToCameraRoll(collagePath) {
+  if (!collagePath || !existsSync(collagePath)) {
+    return { ok: false, reason: "no collage" };
+  }
+  if (!isTermux()) {
+    return { ok: false, reason: "not termux" };
+  }
+
+  const home = process.env.HOME || homedir();
+  const candidates = [
+    join(home, "storage/dcim/Camera"),
+    join(home, "storage/dcim"),
+    join(home, "storage/pictures"),
+    join(home, "storage/shared/DCIM/Camera"),
+    join(home, "storage/shared/Pictures"),
+  ];
+  const base = candidates.find((d) => existsSync(d));
+  if (!base) {
+    return {
+      ok: false,
+      reason: "storage not linked — run: termux-setup-storage",
+    };
+  }
+
+  const destDir = join(base, "TPlus");
+  try {
+    mkdirSync(destDir, { recursive: true });
+  } catch (e) {
+    return { ok: false, reason: e.message || "mkdir failed" };
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dest = join(destDir, `collage-${stamp}.jpg`);
+  try {
+    copyFileSync(collagePath, dest);
+  } catch (e) {
+    return { ok: false, reason: e.message || "copy failed" };
+  }
+
+  const scan = spawnSync("termux-media-scan", [dest], {
+    encoding: "utf8",
+  });
+  const scanned = !scan.error && scan.status === 0;
+  // Don't termux-open the jpg here — it would cover the review page again.
+
+  return { ok: true, dest, scanned, name: basename(dest) };
 }
 
 /**
@@ -29,14 +89,25 @@ export function openManualXDraft(opts) {
   const textCopy = copyTextBestEffort(caption);
   steps.push(textCopy.ok ? "caption → clipboard" : "caption clipboard skipped");
 
+  /** @type {{ ok: boolean, dest?: string, reason?: string, scanned?: boolean }} */
+  let gallery = { ok: false };
   let imgCopy = { ok: false };
   if (collagePath && existsSync(collagePath)) {
-    imgCopy = copyImageBestEffort(collagePath);
-    steps.push(
-      imgCopy.ok
-        ? "collage → clipboard"
-        : "collage clipboard skipped (drag from review page)",
-    );
+    if (termux) {
+      gallery = saveCollageToCameraRoll(collagePath);
+      steps.push(
+        gallery.ok
+          ? `collage → camera roll (${gallery.dest})`
+          : `camera roll save failed (${gallery.reason || "unknown"})`,
+      );
+    } else {
+      imgCopy = copyImageBestEffort(collagePath);
+      steps.push(
+        imgCopy.ok
+          ? "collage → clipboard"
+          : "collage clipboard skipped (drag from review page)",
+      );
+    }
   } else {
     steps.push("no collage (text-only)");
   }
@@ -70,7 +141,7 @@ export function openManualXDraft(opts) {
     );
   }
 
-  return { ok: true, steps, intentUrl, textCopy, imgCopy, termux };
+  return { ok: true, steps, intentUrl, textCopy, imgCopy, gallery, termux };
 }
 
 /**

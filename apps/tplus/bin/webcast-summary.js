@@ -171,8 +171,13 @@ async function main() {
     });
     console.log(`open-draft: ${opened.steps.join(" · ")}`);
     if (opened.termux) {
+      if (opened.gallery?.ok) {
+        console.log(
+          `Camera roll: ${opened.gallery.dest}${opened.gallery.scanned ? " (media-scanned)" : " (scan skipped — check Gallery)"}`,
+        );
+      }
       console.log(
-        "Termux: use the review page → “Open draft on X”. Caption should be on the clipboard (termux-api).",
+        "Termux: review page → “Open draft on X”, then attach the collage from Photos/Gallery.",
       );
     } else {
       console.log(

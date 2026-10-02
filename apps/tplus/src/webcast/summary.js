@@ -332,6 +332,7 @@ export function xComposeIntentUrl(caption) {
 
 /**
  * Local review page: collage + Open draft on X.
+ * Embeds the collage as a data URI so file:// browsers (Termux) can show it.
  * @param {string} outDir
  * @param {{ caption: string, intentUrl: string, mission?: string, collageFile?: string|null }} opts
  */
@@ -340,12 +341,30 @@ export function writePostHtml(outDir, opts) {
   const mission = opts.mission || "Launch";
   const caption = String(opts.caption || "");
   const intentUrl = opts.intentUrl || xComposeIntentUrl(caption);
-  const imgBlock = collageFile
-    ? `<img id="collage" src="${escapeAttr(collageFile)}" alt="Flight collage" />
+
+  /** @type {string|null} */
+  let imgSrc = null;
+  if (collageFile) {
+    const abs = join(outDir, collageFile);
+    if (existsSync(abs)) {
+      try {
+        imgSrc = `data:image/jpeg;base64,${readFileSync(abs).toString("base64")}`;
+      } catch {
+        imgSrc = null;
+      }
+    }
+  }
+
+  const imgBlock = imgSrc
+    ? `<img id="collage" src="${imgSrc}" alt="Flight collage" />
   <div class="row">
     <button class="cta secondary" type="button" id="copyImage">Copy collage</button>
-  </div>`
-    : `<p class="lead">No stills in the public feed for this flight — text-only draft.</p>`;
+  </div>
+  <p class="hint">Phone: collage is also saved to your gallery/camera roll when you use <kbd>--open</kbd> in Termux — attach it from Photos in X. Image clipboard is often blocked in mobile browsers.</p>`
+    : collageFile
+      ? `<p class="lead">Collage file missing on disk — text-only draft.</p>`
+      : `<p class="lead">No stills in the public feed for this flight — text-only draft.</p>`;
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -371,7 +390,7 @@ export function writePostHtml(outDir, opts) {
 </head>
 <body>
   <h1>${escapeHtml(mission)} — ready to post</h1>
-  <p class="lead">Text is prefilled on X.${collageFile ? " Attach the collage (drag from this page, or paste if it’s on your clipboard)." : ""}</p>
+  <p class="lead">Text is prefilled on X.${imgSrc ? " Attach the collage from your gallery (phone) or drag/paste (desktop)." : ""}</p>
   <div class="row">
     <a class="cta" id="openX" href="${escapeAttr(intentUrl)}" target="_blank" rel="noopener">Open draft on X</a>
     <button class="cta secondary" type="button" id="copyCaption">Copy caption</button>
@@ -380,7 +399,7 @@ export function writePostHtml(outDir, opts) {
   <h2 style="font-size:1rem;margin:1.25rem 0 0.5rem">Caption</h2>
   <pre id="caption">${escapeHtml(caption)}</pre>
   <p class="hint">
-    Click <strong>Open draft on X</strong>, glance the text, attach the collage if you have one, then Post.
+    Tap <strong>Open draft on X</strong>, check the text, attach the collage if you have one, then Post.
   </p>
   <script>
     const caption = document.getElementById("caption").innerText;
@@ -402,7 +421,7 @@ export function writePostHtml(outDir, opts) {
           await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/jpeg"]: blob })]);
           copyImg.textContent = "Collage copied";
         } catch (e) {
-          alert("Clipboard image copy blocked — drag the image into X instead.");
+          alert("Image clipboard blocked on this browser — attach from gallery/camera roll instead.");
         }
       };
     }
