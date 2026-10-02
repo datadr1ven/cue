@@ -25,7 +25,8 @@
     "./config.js": "./src/config.js",
     "./users.js": "./src/users.js",
     "./delivery.js": "./src/delivery.js",
-    "./telegram-inbox.js": "./src/telegram-inbox.js"
+    "./telegram-inbox.js": "./src/telegram-inbox.js",
+    "./public-feed.js": "./src/public-feed.js"
   },
   "bin": {
     "cue-replay": "./bin/replay.js"
