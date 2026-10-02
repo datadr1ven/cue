@@ -12,8 +12,11 @@ export const LL2_THROTTLE_NOTE =
   "LL2 free tier is 15 req/hour/IP; webcast:live uses one detailed fetch per run.";
 
 /**
- * LL2 timeline abbrev → Cue LAUNCH_ACTIONS id.
- * Unknown abbrevs become null (caller may skip or defer until dumb /suggest).
+ * LL2 timeline abbrev → stable actionId (matches LAUNCH_ACTIONS / ASR phrases when possible).
+ *
+ * Why map at all? LL2 labels vary ("Max-Q" vs "Max Q"); webcast emit + ASR gate are
+ * one-shot per actionId. Mapping = nice stable ids. Unknown T+ rows are still kept
+ * (slugified) so we fire every published mission timeline time — see mapTimeline.
  */
 export const LL2_ABBREV_TO_ACTION = {
   Liftoff: "liftoff",
@@ -37,16 +40,46 @@ export const LL2_ABBREV_TO_ACTION = {
   "SECO-2": "seco2",
   "SES-3": "relight",
   "SECO-3": "relight",
-"Booster Boostback Burn Startup": "boostback_start",
-"Booster Boostback Burn Shutdown": "boostback_end",
-"Orbital Insertion Burn Start": "relight",
-"Orbital Insertion Burn End": "seco2",
-"Deorbit Burn Start": "ses2",
-"Atmospheric Entry": "entry",
-"Starship Landing Burn": "landing_burn_ship",
-"Starship Landing": "ship_splash",
+  "Booster Boostback Burn Startup": "boostback_start",
+  "Booster Boostback Burn Shutdown": "boostback_end",
+  "Orbital Insertion Burn Start": "relight",
+  "Orbital Insertion Burn End": "seco2",
+  "Deorbit Burn Start": "ses2",
+  "Atmospheric Entry": "entry",
+  "Starship Landing Burn": "landing_burn_ship",
+  "Starship Landing": "ship_splash",
+
+  // Falcon Heavy (and dual-booster wording on LL2 / SpaceX pages)
+  SBECO: "side_beco",
+  "Side Booster Engine Cutoff": "side_beco",
+  "Boosters Separation": "side_sep",
+  "Side Boosters Separate": "side_sep",
+  "Boosters Flip": "side_flip",
+  "Side Boosters Flip": "side_flip",
+  "Boosters Boostback Burn Startup": "boostback_start",
+  "Boosters Boostback Burn Shutdown": "boostback_end",
+  "Boostback Burn Startup": "boostback_start",
+  "Boostback Burn Shutdown": "boostback_end",
+  "Boostback Burn Start": "boostback_start",
+  "Boostback Burn End": "boostback_end",
+  "Boosters Entry Burn Startup": "entry_burn",
+  "Boosters Entry Burn Shutdown": "entry_burn_end",
+  "Boosters Landing Burn": "landing_burn_booster",
+  "Boosters Landing": "booster_landing",
+  "Side Boosters Landing": "booster_landing",
+
   // Payload Separation handled specially (first/last only) — see mapTimeline
 };
+
+/** Stable actionId when LL2 abbrev is not in LL2_ABBREV_TO_ACTION. */
+export function slugActionId(abbrev) {
+  const s = String(abbrev || "event")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+  return s || "event";
+}
 
 /**
  * Parse LL2 ISO-8601 durations used on timeline.relative_time.
@@ -250,16 +283,14 @@ if (
       continue;
     }
 
-    const actionId = LL2_ABBREV_TO_ACTION[abbrev] || null;
+    let actionId = LL2_ABBREV_TO_ACTION[abbrev] || null;
     if (!actionId) {
+      // Still schedule the published T+ time — slugify so emit stays one-shot.
+      actionId = slugActionId(abbrev || label);
       unmapped.push(abbrev || label);
-      if (opts.includeUnmapped) {
-        // Not fireable on current Worker — omit until dumb /suggest
-        skipped.push(`unmapped abbrev omitted: ${abbrev || label}`);
-      } else {
-        skipped.push(`unmapped abbrev omitted: ${abbrev || label}`);
-      }
-      continue;
+      skipped.push(
+        `unmapped abbrev → slug actionId ${actionId}: ${abbrev || label}`,
+      );
     }
 
     script.push({ tPlusSec: sec, actionId, label });
