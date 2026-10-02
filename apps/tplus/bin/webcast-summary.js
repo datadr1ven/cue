@@ -173,11 +173,23 @@ async function main() {
     if (opened.termux) {
       if (opened.gallery?.ok) {
         console.log(
-          `Camera roll: ${opened.gallery.dest}${opened.gallery.scanned ? " (media-scanned)" : " (scan skipped — check Gallery)"}`,
+          `Gallery file: ${opened.gallery.realDest || opened.gallery.dest}`,
+        );
+        console.log(
+          opened.gallery.scanned
+            ? "Media scan: ok — pull to refresh Photos/Gallery (album TPlus)."
+            : "Media scan: weak/failed — run: termux-media-scan <path above>",
+        );
+      } else if (result.collagePath) {
+        console.log(
+          `Gallery save failed (${opened.gallery?.reason || "unknown"}). Rescue:`,
+        );
+        console.log(
+          `  mkdir -p /sdcard/Pictures/TPlus && cp '${result.collagePath}' /sdcard/Pictures/TPlus/ && termux-media-scan /sdcard/Pictures/TPlus/*`,
         );
       }
       console.log(
-        "Termux: review page → “Open draft on X”, then attach the collage from Photos/Gallery.",
+        "Termux: review page → “Open draft on X”, then attach from Photos → TPlus.",
       );
     } else {
       console.log(

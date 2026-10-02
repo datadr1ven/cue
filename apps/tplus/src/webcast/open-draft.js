@@ -13,10 +13,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "fs";
 import { homedir, tmpdir } from "os";
-import { basename, join } from "path";
+import { basename, dirname, join } from "path";
 
 function isTermux() {
   return !!(
@@ -25,10 +26,34 @@ function isTermux() {
 }
 
 /**
+ * Shared-storage parents Gallery apps actually index.
+ * Prefer real /sdcard paths over ~/storage symlinks (MediaScanner is picky).
+ * @returns {string[]}
+ */
+function galleryParentCandidates() {
+  const home = process.env.HOME || homedir();
+  return [
+    "/sdcard/Pictures",
+    "/storage/emulated/0/Pictures",
+    join(home, "storage/pictures"),
+    join(home, "storage/shared/Pictures"),
+    "/sdcard/DCIM",
+    "/storage/emulated/0/DCIM",
+    join(home, "storage/dcim"),
+    join(home, "storage/shared/DCIM"),
+    join(home, "storage/shared"),
+  ];
+}
+
+/**
  * Copy collage into shared storage and media-scan so it appears in Gallery /
- * camera roll. Requires `termux-setup-storage` once.
+ * camera roll. Requires `termux-setup-storage` once (and Storage permission).
+ *
+ * Note: files under $HOME/cue/... are Termux-private — Gallery will never see
+ * those. This copies out to /sdcard/Pictures/TPlus (etc.) and scans.
+ *
  * @param {string} collagePath
- * @returns {{ ok: boolean, dest?: string, reason?: string, scanned?: boolean }}
+ * @returns {{ ok: boolean, dest?: string, realDest?: string, reason?: string, scanned?: boolean, scanOut?: string }}
  */
 export function saveCollageToCameraRoll(collagePath) {
   if (!collagePath || !existsSync(collagePath)) {
@@ -38,44 +63,74 @@ export function saveCollageToCameraRoll(collagePath) {
     return { ok: false, reason: "not termux" };
   }
 
-  const home = process.env.HOME || homedir();
-  const candidates = [
-    join(home, "storage/dcim/Camera"),
-    join(home, "storage/dcim"),
-    join(home, "storage/pictures"),
-    join(home, "storage/shared/DCIM/Camera"),
-    join(home, "storage/shared/Pictures"),
-  ];
-  const base = candidates.find((d) => existsSync(d));
-  if (!base) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const fileName = `collage-${stamp}.jpg`;
+  /** @type {string[]} */
+  const errors = [];
+
+  let dest = null;
+  for (const parent of galleryParentCandidates()) {
+    if (!existsSync(parent)) continue;
+    const destDir = join(parent, "TPlus");
+    try {
+      mkdirSync(destDir, { recursive: true });
+      const candidate = join(destDir, fileName);
+      copyFileSync(collagePath, candidate);
+      dest = candidate;
+      break;
+    } catch (e) {
+      errors.push(`${parent}: ${e.message || e}`);
+    }
+  }
+
+  if (!dest) {
     return {
       ok: false,
-      reason: "storage not linked — run: termux-setup-storage",
+      reason:
+        errors.length > 0
+          ? `copy failed (${errors[0]}) — run: termux-setup-storage`
+          : "storage not linked — run: termux-setup-storage",
     };
   }
 
-  const destDir = join(base, "TPlus");
+  // MediaScanner wants a real path under /storage/emulated/0, not a symlink.
+  let realDest = dest;
   try {
-    mkdirSync(destDir, { recursive: true });
-  } catch (e) {
-    return { ok: false, reason: e.message || "mkdir failed" };
+    realDest = realpathSync(dest);
+  } catch {
+    /* keep dest */
   }
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const dest = join(destDir, `collage-${stamp}.jpg`);
-  try {
-    copyFileSync(collagePath, dest);
-  } catch (e) {
-    return { ok: false, reason: e.message || "copy failed" };
-  }
-
-  const scan = spawnSync("termux-media-scan", [dest], {
+  const scanArgs = [realDest, dirname(realDest)];
+  const scan = spawnSync("termux-media-scan", scanArgs, {
     encoding: "utf8",
   });
   const scanned = !scan.error && scan.status === 0;
-  // Don't termux-open the jpg here — it would cover the review page again.
+  const scanOut = String(scan.stdout || scan.stderr || "").trim();
 
-  return { ok: true, dest, scanned, name: basename(dest) };
+  // Fallback: am broadcast (older devices) if termux-media-scan missing/fails
+  if (!scanned) {
+    spawnSync(
+      "am",
+      [
+        "broadcast",
+        "-a",
+        "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+        "-d",
+        `file://${realDest}`,
+      ],
+      { encoding: "utf8", stdio: "ignore" },
+    );
+  }
+
+  return {
+    ok: true,
+    dest,
+    realDest,
+    scanned,
+    scanOut: scanOut || undefined,
+    name: basename(dest),
+  };
 }
 
 /**
