@@ -295,3 +295,140 @@ footer a {
 footer p {
   margin: 0.35rem 0;
 }
+
+/* ---- /rules + /sensors prose ---- */
+.prose {
+  --max: 640px;
+}
+
+.page-title {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.35rem, 4.5vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.lede {
+  margin: 0 0 1.5rem;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+.prose h2 {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.prose h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.cmp {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 520px) {
+  .cmp {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cmp > div {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+
+.prose ul {
+  margin: 0 0 1rem;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.prose li {
+  margin: 0.3rem 0;
+}
+
+.prose li::marker {
+  color: var(--dim);
+}
+
+.prose > p {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.muted-note {
+  margin: 0.5rem 0 1rem;
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+
+.faq {
+  margin: 0;
+}
+
+.faq dt {
+  margin: 1rem 0 0.25rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.faq dt:first-child {
+  margin-top: 0;
+}
+
+.faq dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.appendix {
+  margin: 1.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-elev);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.appendix summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.appendix p {
+  margin: 0.75rem 0 0;
+}
+
+.appendix a,
+.prose a:not(.brand):not(.cta) {
+  color: var(--accent);
+}
+
+.back {
+  margin: 1.5rem 0 0;
+}
+
+.back a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.back a:hover {
+  color: var(--text);
+}

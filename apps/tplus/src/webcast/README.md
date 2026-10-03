@@ -62,3 +62,6 @@ npm run webcast:live -- \
 3. **HUD scroller “at present”** — heuristic  
 4. **Vision / telemetry** — TODO hooks  
 5. **Artifacts** — still uploaded for `file_id` minting; included on **ops** fan-out (test skips re-send to avoid dupes with mint)
+
+Roadmap + collaborator sketch: [`docs/SENSORS.md`](../../docs/SENSORS.md).  
+Fan-facing: https://t-plus.pages.dev/sensors · alert brief: [`docs/EVENT-RULES.md`](../../docs/EVENT-RULES.md).

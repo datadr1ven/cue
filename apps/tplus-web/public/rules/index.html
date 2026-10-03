@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>What we alert on — TPlus</title>
+    <meta
+      name="description"
+      content="Plain-language guide to which launch moments TPlus posts — and which it skips."
+    />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="wrap prose">
+      <header class="top">
+        <a class="brand" href="/">
+          <img src="/logo.png" width="44" height="44" alt="" />
+          <span class="brand-name">TPlus</span>
+        </a>
+        <div class="top-actions">
+          <a class="cta" href="/">Live feed</a>
+        </div>
+      </header>
+
+      <h1 class="page-title">What we alert on</h1>
+      <p class="lede">
+        TPlus watches a launch webcast and posts the milestones that matter —
+        not every second of the countdown. Prefer silence between beats.
+        Schedules and streams can lag; this is unofficial.
+      </p>
+
+      <h2>On a typical flight</h2>
+      <div class="cmp">
+        <div>
+          <h3>You get</h3>
+          <ul>
+            <li>Liftoff</li>
+            <li>Max-Q, MECO / stage sep, fairing (when on the plan)</li>
+            <li>Boostback / entry / landing burns</li>
+            <li>Booster landing, splash, or catch</li>
+            <li>Payload deploy start / done</li>
+            <li>Hold / scrub / go when marked</li>
+          </ul>
+        </div>
+        <div>
+          <h3>You don’t</h3>
+          <ul>
+            <li>Every T− tick</li>
+            <li>Every graphic or camera cut</li>
+            <li>Guaranteed Max-Q if the timeline is empty</li>
+            <li>Official range or provider status</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2 id="faq">Why didn’t I get …?</h2>
+      <dl class="faq">
+        <dt>Only liftoff on a rideshare?</dt>
+        <dd>
+          Timelines come from
+          <a href="https://thespacedevs.com/" target="_blank" rel="noopener"
+            >Launch Library 2</a
+          >. Some flights publish NET and a webcast with almost no T+ events —
+          we won’t invent Max-Q.
+        </dd>
+        <dt>An audio footnote on an alert?</dt>
+        <dd>
+          Optional speech spotting can corroborate a milestone. The mission clock
+          and plan stay primary.
+        </dd>
+        <dt>Something I saw on the stream that never pinged?</dt>
+        <dd>
+          If it isn’t on that mission’s plan (or the desk didn’t mark it), it
+          usually stays quiet on purpose.
+        </dd>
+      </dl>
+
+      <h2>Where this is going</h2>
+      <p class="lede" style="margin-bottom: 0.75rem">
+        Today the desk leans on the on-screen clock plus the published plan.
+        Next is a chain of <strong>weak indicators</strong> from the same stream
+        — audio and video cues that vote, rather than spam.
+      </p>
+      <p>
+        <a href="/sensors">How sensing works (and how to help)</a>
+      </p>
+
+      <details class="appendix">
+        <summary>More detail (for the curious)</summary>
+        <p>
+          Operator notes live in the repo:
+          <a
+            href="https://github.com/datadr1ven/cue/blob/main/apps/tplus/docs/EVENT-RULES.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >EVENT-RULES.md</a
+          >
+          ·
+          <a
+            href="https://github.com/datadr1ven/cue/blob/main/apps/tplus/docs/SENSORS.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >SENSORS.md</a
+          >.
+        </p>
+      </details>
+
+      <p class="back">
+        <a href="/">← Back to the live feed</a>
+      </p>
+
+      <footer>
+        <p>
+          Unofficial · Not affiliated with SpaceX or any launch provider.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

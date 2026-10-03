@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How sensing works — TPlus</title>
+    <meta
+      name="description"
+      content="TPlus plans to fuse weak indicators from the webcast — clock, speech, video, audio — and welcomes sensor contributors."
+    />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="wrap prose">
+      <header class="top">
+        <a class="brand" href="/">
+          <img src="/logo.png" width="44" height="44" alt="" />
+          <span class="brand-name">TPlus</span>
+        </a>
+        <div class="top-actions">
+          <a class="cta" href="/">Live feed</a>
+        </div>
+      </header>
+
+      <h1 class="page-title">How sensing works</h1>
+      <p class="lede">
+        TPlus should notice launch moments the way a careful human does: many
+        small cues, not one fragile detector. This page is the public sketch —
+        what runs today, where we’re headed, and how collaborators can help.
+      </p>
+
+      <h2>Today</h2>
+      <div class="cmp">
+        <div>
+          <h3>Spine</h3>
+          <ul>
+            <li>Mission plan (Launch Library 2 → milestones)</li>
+            <li>OCR on the webcast T+ / hold clock</li>
+            <li>Emit when the clock hits a planned beat</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Already weak</h3>
+          <ul>
+            <li>Speech phrases as corroboration</li>
+            <li>Light on-screen text heuristics</li>
+            <li>Still frames as artifacts, not proof</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted-note">
+        Speech alone does not blast subscribers. The plan still gates public
+        noise.
+      </p>
+
+      <h2>Next: a chain of weak indicators</h2>
+      <p>
+        Instead of “OCR or nothing,” treat the webcast as a bag of sensors that
+        each cast a <strong>vote</strong>:
+      </p>
+      <ul>
+        <li>
+          <strong>Video classification</strong> — pad / plume / stage sep /
+          landing scene, and similar
+        </li>
+        <li>
+          <strong>Audio classification</strong> — roar, callout energy, engine
+          character (alongside, not instead of, speech-to-text)
+        </li>
+        <li>
+          <strong>More text / HUD readers</strong> — tighter than today’s
+          heuristics
+        </li>
+        <li>
+          Later: other attributable feeds, if they stay optional and honest
+        </li>
+      </ul>
+      <p>
+        Fusion idea: several weak yeses near a planned milestone → confident
+        alert; a lone flash → log it and stay quiet.
+      </p>
+
+      <h2 id="contribute">Contributing a sensor</h2>
+      <p>
+        We want people who love launch AV to plug in
+        <strong>sensors</strong>, not rewrite Telegram fan-out.
+      </p>
+      <div class="cmp">
+        <div>
+          <h3>Good fits</h3>
+          <ul>
+            <li>Phrase / pattern packs mapped to milestones</li>
+            <li>Small classifiers (frame or audio in → label + confidence)</li>
+            <li>Offline scorers on saved webcasts</li>
+            <li>Stream workers that emit evidence lines</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Not the goal</h3>
+          <ul>
+            <li>Posting straight to Telegram or the Worker</li>
+            <li>Fighting OCR for clock ownership</li>
+            <li>Scraping private or credentialed feeds</li>
+            <li>Promising official telemetry</li>
+          </ul>
+        </div>
+      </div>
+      <p>
+        Sensors should emit <em>evidence</em> (what you think happened, when,
+        how sure, which sensor). The desk decides whether fans see it.
+      </p>
+      <p class="muted-note">
+        The wire format isn’t frozen yet. Until a versioned evidence schema
+        lands, the best start is an issue with modality, target milestones,
+        sample clips, and how you’d run beside the live desk.
+      </p>
+      <p>
+        <a
+          href="https://github.com/datadr1ven/cue/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Open an issue on cue</a
+        >
+        ·
+        <a
+          href="https://github.com/datadr1ven/cue/blob/main/apps/tplus/docs/SENSORS.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Full SENSORS.md</a
+        >
+      </p>
+
+      <h2>Principles (short)</h2>
+      <ul>
+        <li>Evidence in, alerts out — sensors don’t fan out alone</li>
+        <li>One narrow clock; others propose <em>what</em>, carefully</li>
+        <li>Optional: missing GPU/models must not kill the OCR path</li>
+        <li>Footnote sources; never pretend to be the range</li>
+      </ul>
+
+      <p class="back">
+        <a href="/rules">← What we alert on</a>
+        ·
+        <a href="/">Live feed</a>
+      </p>
+
+      <footer>
+        <p>
+          Unofficial · Not affiliated with SpaceX or any launch provider.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

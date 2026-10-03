@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>What we alert on — GridWhisper</title>
+    <meta
+      name="description"
+      content="Plain-language guide to which F1 moments GridWhisper posts — and which it skips."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="wrap prose">
+      <header class="top">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">🏎️</span>
+          <span class="brand-name">GridWhisper</span>
+        </a>
+        <div class="top-actions">
+          <a class="cta" href="/">Live feed</a>
+        </div>
+      </header>
+
+      <h1 class="page-title">What we alert on</h1>
+      <p class="lede">
+        GridWhisper turns live F1 timing into the moments that matter — not every
+        purple sector. Prefer silence over noise. Live timing can lag; this is
+        unofficial.
+      </p>
+
+      <h2>Practice (FP1–FP3)</h2>
+      <div class="cmp">
+        <div>
+          <h3>You get</h3>
+          <ul>
+            <li>Session start / finish</li>
+            <li>Finish recap (fastest, compounds, busiest pitters)</li>
+          </ul>
+        </div>
+        <div>
+          <h3>You don’t</h3>
+          <ul>
+            <li>Position thrash, pits, radios</li>
+            <li>“Someone went P7→P4”</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>Qualifying</h2>
+      <div class="cmp">
+        <div>
+          <h3>You get</h3>
+          <ul>
+            <li>Q1 / Q2 / Q3 start</li>
+            <li>A few session-bests in Q1/Q2 (capped)</li>
+            <li>Chequered + “into the cut” drama</li>
+            <li>Q1/Q2 cut summary when the next segment starts</li>
+            <li>Q3 provisional pole at the flag</li>
+            <li>
+              Provisional top 3 again if P1–P3 change after the flag (flying
+              laps)
+            </li>
+          </ul>
+        </div>
+        <div>
+          <h3>You don’t</h3>
+          <ul>
+            <li>Every purple / race-style “big swings”</li>
+            <li>Session-best spam in Q3</li>
+            <li>Grid penalties / Sunday starting grid</li>
+            <li>A timer that “finalizes” Q3 — board-driven only</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>Race (and sprint race)</h2>
+      <div class="cmp">
+        <div>
+          <h3>You get</h3>
+          <ul>
+            <li>Green / chequered / finish (incl. under SC when relevant)</li>
+            <li>Lead change into P1</li>
+            <li>Big swings only when someone jumps ~5+ places (filtered)</li>
+            <li>Pits; louder for top cars under safety car</li>
+            <li>SC / VSC / red</li>
+            <li>A few top‑3 team radios</li>
+            <li>Rain starting; notable steward notes</li>
+          </ul>
+        </div>
+        <div>
+          <h3>You don’t</h3>
+          <ul>
+            <li>Processional order every few seconds</li>
+            <li>Tiny place swaps</li>
+            <li>Every radio clip</li>
+            <li>Red-flag tyre-change pit spam</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2 id="faq">Why didn’t I get …?</h2>
+      <dl class="faq">
+        <dt>Someone gained 2 places in Q3?</dt>
+        <dd>
+          Place-swing alerts are for the race, and need a large jump. In quali we
+          use provisional pole / top‑3 updates instead.
+        </dt>
+        <dt>Final Q3 order after flying laps?</dt>
+        <dd>
+          If P1–P3 change after the flag, we re-post the provisional top 3. We
+          don’t run a settle timer.
+        </dt>
+        <dt>Driver “P8” in the press but we said P3?</dt>
+        <dd>
+          That’s usually a grid penalty for Sunday — not the same as qualifying
+          order, and not always in the live timing feed.
+        </dd>
+        <dt>Every purple in Q1?</dt>
+        <dd>Session-bests are capped and spaced so the feed stays readable.</dd>
+      </dl>
+
+      <details class="appendix">
+        <summary>More detail (for the curious)</summary>
+        <p>
+          Full operator notes — moment types, thresholds, cooldowns — live in the
+          repo:
+          <a
+            href="https://github.com/datadr1ven/cue/blob/main/apps/gridwhisper/docs/f1/EVENT-RULES.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >EVENT-RULES.md</a
+          >.
+        </p>
+      </details>
+
+      <p class="back">
+        <a href="/">← Back to the live feed</a>
+      </p>
+
+      <footer>
+        <p>
+          Unofficial · Not affiliated with Formula 1, the FIA, or Formula One
+          Group.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
