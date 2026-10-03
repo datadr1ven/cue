@@ -120,6 +120,8 @@ export function createF1State() {
     poleEmitted: false,
     /** driver_number currently shown as (provisional) pole */
     provisionalPoleDriver: null,
+    /** Last announced provisional P1–P3 driver_numbers (post-chequered reshuffles) */
+    provisionalTop3: null,
     leader: null,
     weather: null,
     /** Event-time of last weather.rain alert (cooldown flapping rainfall bit) */
@@ -290,6 +292,7 @@ export function reduceF1(state, event, opts = {}) {
     next._scStayInherit = null;
     next.poleEmitted = false;
     next.provisionalPoleDriver = null;
+    next.provisionalTop3 = null;
     next.lastWeatherRainAlertT = null;
     next.leader = null;
     next.trackStatus = null;
@@ -1378,6 +1381,7 @@ function applyRaceControl(state, p, t) {
       state.lastRadioInterestT = t || state.lastEventT;
       state.poleEmitted = false;
       state.provisionalPoleDriver = null;
+      state.provisionalTop3 = null;
       state.sessionBestAlertCount = 0;
       state.lastSessionBestAlertT = null;
       state.segmentLapBest = {};

@@ -109,7 +109,7 @@ export function detectF1Moments(prev, next, event) {
     moments.push(...fromPosition(prev, next, p, t));
   }
 
-  // Knockout: post-chequered board drama (into the cut / provisional pole flips)
+  // Knockout: post-chequered board drama (into the cut / provisional top-3 flips)
   if (
     event.type === "f1.position" &&
     (isKnockoutMode(next) || isQualifyingMode(next)) &&
@@ -257,11 +257,18 @@ export function applyOrderHeartbeatBookkeeping(state, event, moments) {
     if (m.type === "quali.pole" || m.type === "quali.pole_change") {
       const poleDrv =
         m.data?.pole?.driver ?? m.data?.driver ?? next.provisionalPoleDriver;
+      const top3Drivers = (m.data?.top3 || [])
+        .map((r) => Number(r?.driver))
+        .filter((n) => Number.isFinite(n))
+        .slice(0, 3);
       next = {
         ...next,
         poleEmitted: true,
         provisionalPoleDriver:
           poleDrv != null ? Number(poleDrv) : next.provisionalPoleDriver,
+        // Last announced provisional P1–P3 (for post-chequered reshuffles)
+        provisionalTop3:
+          top3Drivers.length > 0 ? top3Drivers : next.provisionalTop3,
       };
     }
     if (m.type === "weather.rain") {
@@ -1127,45 +1134,84 @@ function maybeIntoCut(prev, next, p, t) {
 }
 
 /**
- * Late Q3/SQ3: P1 flips after chequered while cars finish flying laps.
+ * Late Q3/SQ3: provisional top 3 reshuffles after chequered while cars finish
+ * flying laps. Re-emit when any of P1–P3 changes (not only pole).
  */
 function maybeProvisionalPoleChange(prev, next, t) {
   const ended = next.endedSegment || next.segment || 0;
   if (ended < 3 && (next.segment || 0) < 3) return [];
   if (!prev.poleEmitted && !next.poleEmitted) return [];
 
+  // Prefer live board (refreshed into orderAtChequered while awaitingNextSegment)
   const order = next.orderAtChequered || orderedField(next, 10);
   if (!order.length) return [];
-  const p1 = order[0];
-  const poleDrv = Number(p1.driver);
-  if (!Number.isFinite(poleDrv)) return [];
 
+  const top = enrichOrder(next, order.slice(0, 3));
+  const topDrivers = top
+    .map((r) => Number(r.driver))
+    .filter((n) => Number.isFinite(n));
+  if (!topDrivers.length) return [];
+
+  // Prefer prev (last applied announce); next is only updated in applyMoments.
+  const prevTop =
+    Array.isArray(prev.provisionalTop3) && prev.provisionalTop3.length
+      ? prev.provisionalTop3.map(Number)
+      : Array.isArray(next.provisionalTop3) && next.provisionalTop3.length
+        ? next.provisionalTop3.map(Number)
+        : prev.provisionalPoleDriver != null || next.provisionalPoleDriver != null
+          ? [
+              Number(
+                prev.provisionalPoleDriver ?? next.provisionalPoleDriver,
+              ),
+            ].filter((n) => Number.isFinite(n))
+          : [];
+
+  // Same P1–P3 (pad-compare so P3 appearing for the first time counts)
+  const sameLen = Math.max(prevTop.length, topDrivers.length, 3);
+  let changed = prevTop.length === 0;
+  if (!changed) {
+    for (let i = 0; i < sameLen; i++) {
+      if ((prevTop[i] ?? null) !== (topDrivers[i] ?? null)) {
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) return [];
+
+  const poleDrv = topDrivers[0];
   const prevPole =
     next.provisionalPoleDriver != null
       ? Number(next.provisionalPoleDriver)
       : prev.provisionalPoleDriver != null
         ? Number(prev.provisionalPoleDriver)
-        : null;
-  if (prevPole != null && prevPole === poleDrv) return [];
+        : prevTop[0] != null
+          ? Number(prevTop[0])
+          : null;
+  const poleChanged = prevPole != null && prevPole !== poleDrv;
 
-  const top = enrichOrder(next, order.slice(0, 3));
   const finalLabel = segmentLabel(3, next.sessionKind);
   return [
     {
-      id: `pole-change-${poleDrv}-${t}`,
+      id: `pole-change-${topDrivers.join("-")}-${t}`,
       type: "quali.pole_change",
       severity: 8,
       t,
-      entities: [poleDrv],
+      entities: topDrivers,
       data: {
         driver: poleDrv,
         pole: top[0] || null,
         poleName: top[0]?.name || driverLabel(next, poleDrv),
-        prevPoleDriver: prevPole,
+        // Only mention "was …" when P1 actually flipped
+        prevPoleDriver: poleChanged ? prevPole : null,
         prevPoleName:
-          prevPole != null ? driverLabel(next, prevPole) : null,
+          poleChanged && prevPole != null
+            ? driverLabel(next, prevPole)
+            : null,
         top3: top,
         provisional: true,
+        top3Changed: true,
+        poleChanged,
         sprintShootout: next.sessionKind === "sprint_qualifying",
         ...contextFields(next, finalLabel),
       },
