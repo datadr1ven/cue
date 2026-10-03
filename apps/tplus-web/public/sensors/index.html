@@ -6,7 +6,7 @@
     <title>How sensing works — TPlus</title>
     <meta
       name="description"
-      content="TPlus plans to fuse weak indicators from the webcast — clock, speech, video, audio — and welcomes sensor contributors."
+      content="How TPlus detects launch milestones today, the multi-sensor roadmap, and how contributors can help."
     />
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="stylesheet" href="/styles.css" />
@@ -25,118 +25,155 @@
 
       <h1 class="page-title">How sensing works</h1>
       <p class="lede">
-        TPlus should notice launch moments the way a careful human does: many
-        small cues, not one fragile detector. This page is the public sketch —
-        what runs today, where we’re headed, and how collaborators can help.
+        TPlus aims to notice launch milestones the way a careful viewer would:
+        several imperfect cues, combined with judgment — not a single brittle
+        detector. This page covers what runs today, what comes next, and how
+        outside contributors can plug in.
       </p>
 
-      <h2>Today</h2>
+      <h2>How it works today</h2>
       <div class="cmp">
         <div>
-          <h3>Spine</h3>
+          <h3>Primary path</h3>
           <ul>
-            <li>Mission plan (Launch Library 2 → milestones)</li>
-            <li>OCR on the webcast T+ / hold clock</li>
-            <li>Emit when the clock hits a planned beat</li>
+            <li>
+              A mission plan of expected milestones (from
+              <a href="https://thespacedevs.com/" target="_blank" rel="noopener"
+                >Launch Library 2</a
+              >
+              when available)
+            </li>
+            <li>
+              Optical character recognition (OCR) of the webcast’s T+ / hold
+              clock
+            </li>
+            <li>
+              An alert when that clock reaches a planned milestone
+            </li>
           </ul>
         </div>
         <div>
-          <h3>Already weak</h3>
+          <h3>Supporting signals</h3>
           <ul>
-            <li>Speech phrases as corroboration</li>
-            <li>Light on-screen text heuristics</li>
-            <li>Still frames as artifacts, not proof</li>
+            <li>Speech-to-text phrase matches as corroboration</li>
+            <li>Simple on-screen text heuristics</li>
+            <li>
+              Still frames attached to alerts (for context, not as proof)
+            </li>
           </ul>
         </div>
       </div>
       <p class="muted-note">
-        Speech alone does not blast subscribers. The plan still gates public
-        noise.
+        Speech alone does not notify subscribers. The mission plan still
+        controls what can go to the public feed.
       </p>
 
-      <h2>Next: a chain of weak indicators</h2>
+      <h2>Next: multiple supporting sensors</h2>
       <p>
-        Instead of “OCR or nothing,” treat the webcast as a bag of sensors that
-        each cast a <strong>vote</strong>:
+        Rather than relying on the clock alone, the webcast can feed several
+        independent sensors. Each contributes evidence — a label, time, and
+        confidence — that can support or contradict a planned milestone:
       </p>
       <ul>
         <li>
-          <strong>Video classification</strong> — pad / plume / stage sep /
-          landing scene, and similar
+          <strong>Video classification</strong> — scenes such as pad hold,
+          liftoff plume, stage separation, or landing
         </li>
         <li>
-          <strong>Audio classification</strong> — roar, callout energy, engine
-          character (alongside, not instead of, speech-to-text)
+          <strong>Audio classification</strong> — crowd reaction, callout
+          energy, or engine character (in addition to speech-to-text)
         </li>
         <li>
-          <strong>More text / HUD readers</strong> — tighter than today’s
-          heuristics
+          <strong>Improved on-screen text readers</strong> — tighter than
+          today’s heuristics
         </li>
         <li>
-          Later: other attributable feeds, if they stay optional and honest
+          Other attributable public signals later, if they stay optional and
+          clearly sourced
         </li>
       </ul>
       <p>
-        Fusion idea: several weak yeses near a planned milestone → confident
-        alert; a lone flash → log it and stay quiet.
+        Intended fusion rule: several agreeing signals near a planned milestone
+        → a confident alert; a single isolated flash → log it and stay quiet.
       </p>
 
       <h2 id="contribute">Contributing a sensor</h2>
       <p>
-        We want people who love launch AV to plug in
-        <strong>sensors</strong>, not rewrite Telegram fan-out.
+        Contributors who care about launch audio/video can add
+        <strong>sensors</strong> — small detectors that emit evidence — without
+        rebuilding alert delivery (Telegram, the public feed, or the cloud
+        worker).
       </p>
       <div class="cmp">
         <div>
           <h3>Good fits</h3>
           <ul>
-            <li>Phrase / pattern packs mapped to milestones</li>
-            <li>Small classifiers (frame or audio in → label + confidence)</li>
-            <li>Offline scorers on saved webcasts</li>
-            <li>Stream workers that emit evidence lines</li>
+            <li>Phrase or pattern packs mapped to milestone ids</li>
+            <li>
+              Small classifiers (frame or audio in → label + confidence)
+            </li>
+            <li>Offline scorers that evaluate saved webcasts</li>
+            <li>
+              Stream-side workers that emit evidence records while a flight
+              runs
+            </li>
           </ul>
         </div>
         <div>
-          <h3>Not the goal</h3>
+          <h3>Out of scope</h3>
           <ul>
-            <li>Posting straight to Telegram or the Worker</li>
-            <li>Fighting OCR for clock ownership</li>
+            <li>Posting alerts directly to subscribers</li>
+            <li>Competing with OCR for mission-clock ownership</li>
             <li>Scraping private or credentialed feeds</li>
-            <li>Promising official telemetry</li>
+            <li>Claiming official telemetry or range status</li>
           </ul>
         </div>
       </div>
       <p>
-        Sensors should emit <em>evidence</em> (what you think happened, when,
-        how sure, which sensor). The desk decides whether fans see it.
+        A sensor should report <em>evidence</em>: what it thinks happened, when,
+        how confident it is, and which sensor produced it. Alert fan-out stays
+        with the TPlus operator path.
       </p>
       <p class="muted-note">
-        The wire format isn’t frozen yet. Until a versioned evidence schema
-        lands, the best start is an issue with modality, target milestones,
-        sample clips, and how you’d run beside the live desk.
+        The evidence record format is not finalized. Until a versioned schema
+        is published, the best starting point is a GitHub issue describing
+        modality, target milestones, sample clips, and how you would run beside
+        the live webcast consumer.
       </p>
       <p>
         <a
           href="https://github.com/datadr1ven/cue/issues"
           target="_blank"
           rel="noopener noreferrer"
-          >Open an issue on cue</a
+          >Open an issue</a
         >
         ·
         <a
           href="https://github.com/datadr1ven/cue/blob/main/apps/tplus/docs/SENSORS.md"
           target="_blank"
           rel="noopener noreferrer"
-          >Full SENSORS.md</a
+          >SENSORS.md (full notes)</a
         >
       </p>
 
-      <h2>Principles (short)</h2>
+      <h2>Design principles</h2>
       <ul>
-        <li>Evidence in, alerts out — sensors don’t fan out alone</li>
-        <li>One narrow clock; others propose <em>what</em>, carefully</li>
-        <li>Optional: missing GPU/models must not kill the OCR path</li>
-        <li>Footnote sources; never pretend to be the range</li>
+        <li>
+          Sensors emit evidence; they do not send subscriber alerts on their
+          own
+        </li>
+        <li>
+          One authoritative mission clock; other sensors propose
+          <em>what</em> happened, carefully
+        </li>
+        <li>
+          Sensors are optional — missing models or GPUs must not break the OCR
+          path
+        </li>
+        <li>
+          Source attribution is fine; pretending to be the official range is
+          not
+        </li>
       </ul>
 
       <p class="back">

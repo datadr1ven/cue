@@ -6,7 +6,7 @@
     <title>What we alert on — TPlus</title>
     <meta
       name="description"
-      content="Plain-language guide to which launch moments TPlus posts — and which it skips."
+      content="Which launch milestones TPlus posts — and which it skips."
     />
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="stylesheet" href="/styles.css" />
@@ -25,9 +25,10 @@
 
       <h1 class="page-title">What we alert on</h1>
       <p class="lede">
-        TPlus watches a launch webcast and posts the milestones that matter —
-        not every second of the countdown. Prefer silence between beats.
-        Schedules and streams can lag; this is unofficial.
+        TPlus watches a launch webcast and posts major flight milestones — not a
+        second-by-second countdown. Which events appear depends on that
+        mission’s published timeline. Schedules and streams can lag; this
+        project is unofficial.
       </p>
 
       <h2>On a typical flight</h2>
@@ -36,60 +37,71 @@
           <h3>You get</h3>
           <ul>
             <li>Liftoff</li>
-            <li>Max-Q, MECO / stage sep, fairing (when on the plan)</li>
-            <li>Boostback / entry / landing burns</li>
-            <li>Booster landing, splash, or catch</li>
-            <li>Payload deploy start / done</li>
-            <li>Hold / scrub / go when marked</li>
+            <li>
+              Max-Q, main-engine cutoff / stage separation, fairing deploy —
+              when listed for the mission
+            </li>
+            <li>Boostback, entry, and landing burns</li>
+            <li>Booster landing, splashdown, or catch</li>
+            <li>Payload deploy start and complete</li>
+            <li>Hold, scrub, or go-for-launch when those are called</li>
           </ul>
         </div>
         <div>
           <h3>You don’t</h3>
           <ul>
-            <li>Every T− tick</li>
-            <li>Every graphic or camera cut</li>
-            <li>Guaranteed Max-Q if the timeline is empty</li>
-            <li>Official range or provider status</li>
+            <li>Every countdown second</li>
+            <li>Every camera cut or on-screen graphic change</li>
+            <li>
+              Guaranteed mid-flight milestones when the public timeline only
+              has liftoff
+            </li>
+            <li>Official range or launch-provider status</li>
           </ul>
         </div>
       </div>
 
-      <h2 id="faq">Why didn’t I get …?</h2>
+      <h2 id="faq">Common questions</h2>
       <dl class="faq">
-        <dt>Only liftoff on a rideshare?</dt>
+        <dt>Why only liftoff on some flights?</dt>
         <dd>
-          Timelines come from
+          Mission timelines are imported from
           <a href="https://thespacedevs.com/" target="_blank" rel="noopener"
             >Launch Library 2</a
-          >. Some flights publish NET and a webcast with almost no T+ events —
-          we won’t invent Max-Q.
+          >. Some missions publish a launch window and webcast with few or no
+          timed events after liftoff. TPlus does not invent milestones that are
+          not on the plan.
         </dd>
-        <dt>An audio footnote on an alert?</dt>
+        <dt>What does an “audio” note on an alert mean?</dt>
         <dd>
-          Optional speech spotting can corroborate a milestone. The mission clock
-          and plan stay primary.
+          Optional speech recognition can corroborate a milestone (for example
+          hearing a callout). The on-screen mission clock and the published plan
+          remain the primary triggers.
         </dd>
-        <dt>Something I saw on the stream that never pinged?</dt>
+        <dt>I saw something on the webcast that never alerted — why?</dt>
         <dd>
-          If it isn’t on that mission’s plan (or the desk didn’t mark it), it
-          usually stays quiet on purpose.
+          Public alerts generally follow the mission plan. Events that are not
+          listed there, or that were not marked by the operator during the
+          flight, usually stay off the subscriber feed on purpose.
         </dd>
       </dl>
 
-      <h2>Where this is going</h2>
-      <p class="lede" style="margin-bottom: 0.75rem">
-        Today the desk leans on the on-screen clock plus the published plan.
-        Next is a chain of <strong>weak indicators</strong> from the same stream
-        — audio and video cues that vote, rather than spam.
+      <h2>How detection is evolving</h2>
+      <p>
+        Today, alerts are driven mainly by the webcast’s mission clock and the
+        published timeline. The longer-term design is to combine several
+        supporting signals from the same stream — speech, video, and audio cues
+        — so each milestone is corroborated rather than guessed from a single
+        detector.
       </p>
       <p>
-        <a href="/sensors">How sensing works (and how to help)</a>
+        <a href="/sensors">How sensing works</a>
       </p>
 
       <details class="appendix">
-        <summary>More detail (for the curious)</summary>
+        <summary>More detail</summary>
         <p>
-          Operator notes live in the repo:
+          Operator notes and the sensing roadmap are in the open-source repo:
           <a
             href="https://github.com/datadr1ven/cue/blob/main/apps/tplus/docs/EVENT-RULES.md"
             target="_blank"
