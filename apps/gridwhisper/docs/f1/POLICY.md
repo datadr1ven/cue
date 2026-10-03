@@ -2,6 +2,8 @@
 
 How Cue decides which OpenF1 events become sparse alerts. **Runtime filtering lives in code** (`packages/cue/src/engine/domains/f1/moments.js`, `packages/cue/src/engine/domains/f1/snapshot.js`); this doc preserves *why*.
 
+**Fan/operator readable rules (what fires when):** [EVENT-RULES.md](./EVENT-RULES.md).
+
 ## Principles
 
 1. **Do not invent detectors from a single race.** Implement only what repeats across a frozen evaluation set, or is unambiguously high-severity everywhere.
