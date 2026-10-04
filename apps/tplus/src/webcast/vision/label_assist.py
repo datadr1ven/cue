@@ -354,10 +354,15 @@ def main() -> int:
         rel_links = []
         for run_dir in runs:
             review = (run_dir / "vision" / "review.html").resolve()
+            href: str
             try:
                 href = str(review.relative_to(gold))
             except ValueError:
-                href = review.as_uri()
+                # Common layout: <webcast>/vision-gold next to <webcast>/runs
+                try:
+                    href = str(review.relative_to(gold.parent))
+                except ValueError:
+                    href = review.as_uri()
             n = sum(1 for r in all_rows if r["runId"] == run_dir.name)
             rel_links.append(
                 f'<li><a href="{html.escape(href)}">{html.escape(run_dir.name)}</a> — {n} frames</li>'
