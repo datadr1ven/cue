@@ -10,6 +10,7 @@ See [`docs/VISION-ENRICHMENT.md`](../../../docs/VISION-ENRICHMENT.md) for the pl
 vision/
   README.md
   extract_windows.py   # dense frames around milestone emits (yt-dlp -g / ffmpeg)
+  label_assist.py      # stratified sample + review.html for gold labels
   labels.schema.json   # gold JSONL schema
   score_frame.py       # OpenCV baseline scorer (heuristics)
   eval_enrich.py       # rank frames in an emit window
@@ -40,6 +41,14 @@ vision/
 .venv-webcast/bin/python apps/tplus/src/webcast/vision/eval_enrich.py \
   --run-dir /path/to/tplus-webcast/runs/<runId> \
   --action seco
+
+# 3) Labeling pack (stratified stubs + local review gallery)
+.venv-webcast/bin/python apps/tplus/src/webcast/vision/label_assist.py \
+  --runs-root /path/to/tplus-webcast/runs \
+  --per-window 6 \
+  --gold-dir /path/to/tplus-webcast/vision-gold
+# open vision-gold/index.html (or each run's vision/review.html),
+# correct labels, download labels.jsonl → save as runs/<id>/vision/labels.jsonl
 ```
 
 `extract_windows.py` anchors T+0 using `--liftoff-video-sec`, or estimates  
