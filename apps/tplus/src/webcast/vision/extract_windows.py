@@ -294,36 +294,25 @@ def main() -> int:
         return 1
 
     video: Path | None = args.video.expanduser().resolve() if args.video else None
-    if args.download:
-        url = meta.get("webcastUrl")
-        if not url:
-            print("meta.webcastUrl missing; cannot --download", file=sys.stderr)
-            return 1
-        video = download_video(str(url), run_dir / "vision" / "video")
     if video is None:
-        # reuse prior download
-        prior = list((run_dir / "vision" / "video").glob("source.*")) if (run_dir / "vision" / "video").is_dir() else []
-        prior = [p for p in prior if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}]
-        if prior:
-            video = prior[0]
-    if video is None or not video.is_file():
-        print("Need --video PATH or --download", file=sys.stderr)
-        return 1
-
-    duration = _ffprobe_duration(video)
-    frames_dir = run_dir / "vision" / "frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
+        prior_dir = run_dir / "vision" / "video"
+        if prior_dir.is_dir():
+            prior = [
+                p
+                for p in prior_dir.glob("source.*")
+                if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+            ]
+            if prior:
+                video = prior[0]
 
     plan = []
     for s in selected:
         center = float(liftoff_video_sec) + float(s["clockTPlusSec"])
         start = max(0.0, center - args.before)
         end = center + args.after
-        if duration is not None:
-            end = min(end, duration)
         win_dur = max(0.1, end - start)
         safe = SAFE_ACTION.sub("_", s["actionId"]) or "action"
-        pattern = frames_dir / f"{safe}_%04d.jpg"
+        pattern = run_dir / "vision" / "frames" / f"{safe}_%04d.jpg"
         plan.append(
             {
                 **s,
@@ -339,8 +328,7 @@ def main() -> int:
         json.dumps(
             {
                 "runDir": str(run_dir),
-                "video": str(video),
-                "videoDurationSec": duration,
+                "video": str(video) if video else None,
                 "liftoffVideoSec": liftoff_video_sec,
                 "liftoffSource": estimate_src,
                 "fps": args.fps,
@@ -360,6 +348,25 @@ def main() -> int:
 
     if args.dry_run:
         return 0
+
+    if args.download:
+        url = meta.get("webcastUrl")
+        if not url:
+            print("meta.webcastUrl missing; cannot --download", file=sys.stderr)
+            return 1
+        video = download_video(str(url), run_dir / "vision" / "video")
+    if video is None or not video.is_file():
+        print("Need --video PATH or --download", file=sys.stderr)
+        return 1
+
+    duration = _ffprobe_duration(video)
+    if duration is not None:
+        for w in plan:
+            end = min(w["centerSec"] + args.after, duration)
+            w["durationSec"] = round(max(0.1, end - w["startSec"]), 3)
+
+    frames_dir = run_dir / "vision" / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
 
     windows_out = []
     for w in plan:
