@@ -9,6 +9,7 @@ See [`docs/VISION-ENRICHMENT.md`](../../../docs/VISION-ENRICHMENT.md) for the pl
 ```
 vision/
   README.md
+  extract_windows.py   # dense frames around milestone emits (yt-dlp -g / ffmpeg)
   labels.schema.json   # gold JSONL schema
   score_frame.py       # OpenCV baseline scorer (heuristics)
   eval_enrich.py       # rank frames in an emit window
@@ -23,10 +24,13 @@ vision/
 .venv-webcast/bin/pip install -r apps/tplus/src/webcast/vision/requirements.txt
 
 # 1) Pull dense frames around each milestone (±15s @ 2fps by default)
+# --download resolves the webcast stream (yt-dlp -g) and ffmpeg-grabs
+# only the windows — not the entire multi‑GB VOD.
 .venv-webcast/bin/python apps/tplus/src/webcast/vision/extract_windows.py \
   --run-dir /path/to/tplus-webcast/runs/<runId> \
   --download
 # or: --video /path/to/vod.mp4
+# optional full VOD: --download --full-download
 # dry-run plan: add --dry-run
 # subset: --actions liftoff,seco
 

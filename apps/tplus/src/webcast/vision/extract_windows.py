@@ -19,7 +19,8 @@ liftoff_video_sec sources (first match):
 
 Examples:
   python extract_windows.py --run-dir ~/cue/tplus-webcast/runs/<id> --video /path/vod.mp4
-  python extract_windows.py --run-dir … --download   # yt-dlp from meta.webcastUrl
+  python extract_windows.py --run-dir … --download   # yt-dlp -g stream + ffmpeg windows
+  python extract_windows.py --run-dir … --download --full-download  # entire VOD (large)
   python extract_windows.py --run-dir … --video … --actions liftoff,seco --fps 2
 """
 
@@ -165,12 +166,37 @@ def _which_ytdlp() -> str | None:
     return None
 
 
-def download_video(url: str, out_dir: Path) -> Path:
+def resolve_stream_url(page_url: str) -> str:
+    """Resolve a direct media URL (often HLS m3u8) via yt-dlp -g."""
+    ytdlp = _which_ytdlp()
+    if not ytdlp:
+        raise SystemExit("yt-dlp not found (expected .venv-webcast/bin/yt-dlp)")
+    cmd = [
+        ytdlp,
+        "--no-playlist",
+        "-g",
+        "-f",
+        "bv*[height<=720]/b[height<=720]/b",
+        page_url,
+    ]
+    print("+", " ".join(cmd), flush=True)
+    r = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    lines = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+    if not lines:
+        raise SystemExit(f"yt-dlp -g returned no URL for {page_url}")
+    # Prefer a video (m3u8/mp4) line; first line is usually correct
+    for ln in lines:
+        if ".m3u8" in ln or "video" in ln or ln.startswith("http"):
+            return ln
+    return lines[0]
+
+
+def download_full_video(url: str, out_dir: Path) -> Path:
+    """Optional full VOD (large). Prefer resolve_stream_url + window extract."""
     ytdlp = _which_ytdlp()
     if not ytdlp:
         raise SystemExit("yt-dlp not found (expected .venv-webcast/bin/yt-dlp)")
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Prefer a modest mp4; fall back to best
     outtmpl = str(out_dir / "source.%(ext)s")
     cmd = [
         ytdlp,
@@ -185,26 +211,29 @@ def download_video(url: str, out_dir: Path) -> Path:
     ]
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True)
-    hits = sorted(out_dir.glob("source.*"))
-    hits = [h for h in hits if h.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}]
+    hits = [
+        h
+        for h in sorted(out_dir.glob("source.*"))
+        if h.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+    ]
     if not hits:
         raise SystemExit(f"yt-dlp finished but no video in {out_dir}")
     return hits[0]
 
 
 def extract_window(
-    video: Path,
+    video: str | Path,
     start: float,
     duration: float,
     fps: float,
     out_pattern: Path,
 ) -> list[Path]:
     out_pattern.parent.mkdir(parents=True, exist_ok=True)
-    # Clear prior frames for this action prefix
     stem_prefix = out_pattern.name.split("%")[0]
     for old in out_pattern.parent.glob(stem_prefix + "*.jpg"):
         old.unlink()
 
+    # For HLS URLs, reconnect/seek flags help windowed grabs
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -234,7 +263,12 @@ def main() -> int:
     ap.add_argument(
         "--download",
         action="store_true",
-        help="Download meta.webcastUrl via yt-dlp into <run>/vision/video/",
+        help="Resolve meta.webcastUrl (yt-dlp -g) and extract windows from the stream",
+    )
+    ap.add_argument(
+        "--full-download",
+        action="store_true",
+        help="With --download, save the entire VOD under vision/video/ (slow/large)",
     )
     ap.add_argument(
         "--liftoff-video-sec",
@@ -349,17 +383,25 @@ def main() -> int:
     if args.dry_run:
         return 0
 
+    media: str | Path | None = video
     if args.download:
         url = meta.get("webcastUrl")
         if not url:
             print("meta.webcastUrl missing; cannot --download", file=sys.stderr)
             return 1
-        video = download_video(str(url), run_dir / "vision" / "video")
-    if video is None or not video.is_file():
+        if args.full_download:
+            media = download_full_video(str(url), run_dir / "vision" / "video")
+        else:
+            media = resolve_stream_url(str(url))
+            print(f"[extract] stream URL ok ({media[:80]}…)", flush=True)
+    if media is None:
         print("Need --video PATH or --download", file=sys.stderr)
         return 1
+    if isinstance(media, Path) and not media.is_file():
+        print(f"video not found: {media}", file=sys.stderr)
+        return 1
 
-    duration = _ffprobe_duration(video)
+    duration = _ffprobe_duration(media) if isinstance(media, Path) else None
     if duration is not None:
         for w in plan:
             end = min(w["centerSec"] + args.after, duration)
@@ -371,7 +413,7 @@ def main() -> int:
     windows_out = []
     for w in plan:
         files = extract_window(
-            video,
+            media,
             w["startSec"],
             w["durationSec"],
             args.fps,
@@ -399,7 +441,8 @@ def main() -> int:
     manifest = {
         "version": 1,
         "runId": meta.get("runId") or run_dir.name,
-        "video": str(video),
+        "video": str(media) if isinstance(media, Path) else "stream",
+        "stream": None if isinstance(media, Path) else True,
         "videoDurationSec": duration,
         "liftoffVideoSec": liftoff_video_sec,
         "liftoffSource": estimate_src,
