@@ -88,7 +88,7 @@ Local-only OpenCV is fine for iteration; contest submission must show AWS in the
 | # | Step | Owner-ish | Done when |
 |---|------|-----------|-----------|
 | 1 | Register / confirm Devpost entry + rules | you | team on [opencv26.devpost.com](https://opencv26.devpost.com/) |
-| 2 | Frame extraction tool (yt-dlp / archive → `vision/frames` around emits) | code | ≥3 flights with dense windows |
+| 2 | Frame extraction tool (yt-dlp / archive → `vision/frames` around emits) | code | `vision/extract_windows.py` (scaffold done) · ≥3 flights with dense windows |
 | 3 | Label 200–500 frames (v0 labels) | human + light assist | `labels.jsonl` checked in or private gold |
 | 4 | OpenCV baseline (color/motion/HUD heuristics → labels) | code | beats random on eval |
 | 5 | Optional tiny classifier (OpenCV DNN / ONNX) if heuristics plateau | code | measurable lift |
