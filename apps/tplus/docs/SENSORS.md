@@ -80,9 +80,11 @@ Until that lands, open an issue or discussion with: modality, target `actionId`s
 |------|--------|
 | OCR clock + script emit | Done (ops path) |
 | ASR as weak footnote / gated assist | Done (v0) |
-| Document fan rules + this sensor vision | In progress |
+| Document fan rules + this sensor vision | Done |
+| Vision **frame enrichment** plan + OpenCV scaffold | Scaffold — see [VISION-ENRICHMENT.md](./VISION-ENRICHMENT.md) |
+| Dense frame packs + gold labels for offline eval | TODO |
 | Evidence schema + local NDJSON bus | TODO |
-| First vision or audio-class sensor behind the bus | TODO |
+| First vision sensor behind the bus (soft vote) | TODO |
 | Public contributor guide with a real plugin example | TODO (after schema) |
 
 ---

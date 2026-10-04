@@ -64,4 +64,5 @@ npm run webcast:live -- \
 5. **Artifacts** — still uploaded for `file_id` minting; included on **ops** fan-out (test skips re-send to avoid dupes with mint)
 
 Roadmap + collaborator sketch: [`docs/SENSORS.md`](../../docs/SENSORS.md).  
+Vision enrichment / OpenCV contest plan: [`docs/VISION-ENRICHMENT.md`](../../docs/VISION-ENRICHMENT.md) · scaffold: [`vision/`](./vision/).  
 Fan-facing: https://t-plus.pages.dev/sensors · alert brief: [`docs/EVENT-RULES.md`](../../docs/EVENT-RULES.md).

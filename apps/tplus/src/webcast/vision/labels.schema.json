@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tplus-vision-label-v0",
+  "title": "TPlus webcast vision gold label (v0)",
+  "description": "One JSONL line per frame. Labels are coarse scene tags for enrichment + weak evidence.",
+  "type": "object",
+  "required": ["runId", "frame", "labels"],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "description": "Directory name under tplus-webcast/runs/"
+    },
+    "frame": {
+      "type": "string",
+      "description": "Path relative to the run dir, e.g. vision/frames/seco_0042.jpg"
+    },
+    "tPlusSec": {
+      "type": ["number", "null"],
+      "description": "Approx mission clock if known"
+    },
+    "nearActionId": {
+      "type": ["string", "null"],
+      "description": "Closest scripted actionId if in an emit window"
+    },
+    "labels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "plume_on",
+          "plume_off",
+          "pad_or_tower",
+          "vehicle_air",
+          "landing_burn",
+          "hud_heavy",
+          "low_value"
+        ]
+      }
+    },
+    "primary": {
+      "type": "string",
+      "description": "Single best label for ranking metrics"
+    },
+    "notes": { "type": "string" }
+  }
+}
