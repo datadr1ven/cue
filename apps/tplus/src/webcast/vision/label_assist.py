@@ -168,7 +168,15 @@ def _review_html(run_id: str, rows: list[dict], labels: tuple[str, ...]) -> str:
 </article>"""
         )
 
-    payload = html.escape(json.dumps(rows, ensure_ascii=False))
+    # Raw JSON in <script type="application/json"> — do NOT html.escape
+    # (that turns " into &quot; and JSON.parse throws → dead click handlers).
+    # Only neutralize literal </script> so the HTML parser cannot close early.
+    payload = (
+        json.dumps(rows, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
     cards_html = "\n".join(cards)
     return f"""<!doctype html>
 <html lang="en">
@@ -214,7 +222,13 @@ Auto suggestions are from <code>score_frame</code> heuristics — fix freely.</p
 <script id="data" type="application/json">{payload}</script>
 <script>
 const labels = {json.dumps(list(labels))};
-let rows = JSON.parse(document.getElementById('data').textContent);
+let rows;
+try {{
+  rows = JSON.parse(document.getElementById('data').textContent);
+}} catch (err) {{
+  document.getElementById('stat').textContent = 'ERROR: label data failed to parse — ' + err;
+  throw err;
+}}
 const cards = [...document.querySelectorAll('.card')];
 
 function syncStat() {{
