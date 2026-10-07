@@ -33,8 +33,19 @@ from pathlib import Path
 # Lazy import heavy deps after argparse --help
 
 
+# SpaceX-style T±HH:MM:SS (optional spaces)
 CLOCK_RE = re.compile(
     r"T\s*([+\-−])\s*(\d{1,2}):(\d{2}):(\d{2})",
+    re.IGNORECASE,
+)
+# T±MM:SS or T±H:MM:SS (Nuri / some international HUDs drop hours)
+CLOCK_SHORT_RE = re.compile(
+    r"T\s*([+\-−])\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})",
+    re.IGNORECASE,
+)
+# Signed without leading T — OCR often returns "+17:41" / "-47:38"
+SIGNED_SHORT_RE = re.compile(
+    r"(?<![A-Z0-9])([+\-−])\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?!\d)",
     re.IGNORECASE,
 )
 # NASA+/Roscosmos-style countdown without T± (e.g. "00:04:11")
@@ -46,8 +57,16 @@ EVENT_HINTS = re.compile(
 )
 
 
-def _hms_to_sec(h: str, m: str, s: str) -> int:
-    return int(h) * 3600 + int(m) * 60 + int(s)
+def _hms_to_sec(h: str | int | None, m: str | int, s: str | int) -> int:
+    hh = int(h or 0)
+    return hh * 3600 + int(m) * 60 + int(s)
+
+
+def _signed_from_match(m: re.Match[str], *, hours_g: int, min_g: int, sec_g: int) -> tuple[int, int, str]:
+    """Return (signed_sec, unsigned_sec, raw) from a regex match with sign in group 1."""
+    sign = -1 if m.group(1) in "-−" else 1
+    sec = _hms_to_sec(m.group(hours_g), m.group(min_g), m.group(sec_g))
+    return sign * sec, sec, m.group(0)
 
 
 def parse_clock_texts(texts: list[str]) -> tuple[int | None, str | None]:
@@ -60,43 +79,65 @@ def parse_clock_info(texts: list[str]) -> dict:
     """
     Parse mission clock from OCR lines.
 
-    Prefer explicit T±HH:MM:SS (SpaceX). Fall back to bare HH:MM:SS (NASA+)
-    as unsigned magnitude — caller infers sign from motion.
+    Prefer explicit T±HH:MM:SS (SpaceX). Also accept T±MM:SS and signed
+    ±MM:SS / ±H:MM:SS without a leading T (KASA/Nuri HUDs). Fall back to
+    bare HH:MM:SS (NASA+) as unsigned magnitude — caller infers sign from motion.
 
     Returns dict:
-      clockSec: signed seconds if T± present, else None
+      clockSec: signed seconds if a signed form present, else None
       unsignedSec: |clock| magnitude when any clock found
       raw: matched string
       signSource: "signed" | "bare" | None
     """
     joined = " ".join(texts)
-    m = CLOCK_RE.search(joined)
-    if not m:
-        compact = re.sub(r"\s+", "", joined.upper())
-        m2 = re.search(r"T([+\-−])(\d{1,2}):(\d{2}):(\d{2})", compact)
-        if m2:
-            sign = -1 if m2.group(1) in "-−" else 1
-            sec = _hms_to_sec(m2.group(2), m2.group(3), m2.group(4))
-            signed = sign * sec
-            return {
-                "clockSec": signed,
-                "unsignedSec": sec,
-                "raw": m2.group(0),
-                "signSource": "signed",
-            }
-    else:
-        sign = -1 if m.group(1) in "-−" else 1
-        sec = _hms_to_sec(m.group(2), m.group(3), m.group(4))
-        signed = sign * sec
+    compact = re.sub(r"\s+", "", joined.upper())
+
+    # 1) Classic T±HH:MM:SS
+    m = CLOCK_RE.search(joined) or re.search(
+        r"T([+\-−])(\d{1,2}):(\d{2}):(\d{2})", compact
+    )
+    if m:
+        signed, sec, raw = _signed_from_match(m, hours_g=2, min_g=3, sec_g=4)
         return {
             "clockSec": signed,
             "unsignedSec": sec,
-            "raw": m.group(0),
+            "raw": raw,
             "signSource": "signed",
         }
 
-    # Bare HH:MM:SS — pick the first plausible countdown/mission clock
-    # (reject silly values like 99:99:99 via regex digit bounds already)
+    # 2) T±MM:SS or T±H:MM:SS (hours optional)
+    m = CLOCK_SHORT_RE.search(joined) or re.search(
+        r"T([+\-−])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})", compact
+    )
+    if m:
+        mi, s = int(m.group(3)), int(m.group(4))
+        if mi <= 59 and s <= 59:
+            signed, sec, raw = _signed_from_match(m, hours_g=2, min_g=3, sec_g=4)
+            if 0 < sec <= 48 * 3600:
+                return {
+                    "clockSec": signed,
+                    "unsignedSec": sec,
+                    "raw": raw,
+                    "signSource": "signed",
+                }
+
+    # 3) ±MM:SS / ±H:MM:SS without T (Nuri live OCR: "+17:41")
+    m = SIGNED_SHORT_RE.search(joined) or re.search(
+        r"(?<![A-Z0-9])([+\-−])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?!\d)", compact
+    )
+    if m:
+        mi, s = int(m.group(3)), int(m.group(4))
+        if mi <= 59 and s <= 59:
+            signed, sec, raw = _signed_from_match(m, hours_g=2, min_g=3, sec_g=4)
+            if 0 < sec <= 48 * 3600:
+                return {
+                    "clockSec": signed,
+                    "unsignedSec": sec,
+                    "raw": raw,
+                    "signSource": "signed",
+                }
+
+    # 4) Bare HH:MM:SS — pick the first plausible countdown/mission clock
     for bm in BARE_CLOCK_RE.finditer(joined):
         h, mi, s = bm.group(1), bm.group(2), bm.group(3)
         if int(mi) > 59 or int(s) > 59:
