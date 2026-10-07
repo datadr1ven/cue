@@ -165,7 +165,8 @@ def parse_clock_info(texts: list[str]) -> dict:
         if not m:
             continue
         n = int(m.group(1))
-        if 1 <= n <= CIRCLE_MAX_SEC:
+        # Include 0 — circle often lands on "0" at T+0
+        if 0 <= n <= CIRCLE_MAX_SEC:
             circle_vals.append((n, m.group(1)))
     if circle_vals:
         two_digit = [v for v in circle_vals if v[0] >= 10]
@@ -173,7 +174,7 @@ def parse_clock_info(texts: list[str]) -> dict:
             # Prefer the prominent countdown (e.g. "91" over stray "5")
             n, raw = max(two_digit, key=lambda v: v[0])
         else:
-            # Near T−0: prefer the smallest 1..9 (stray "5" from HUD chrome)
+            # Near T−0: prefer the smallest 0..9 (stray "5" from HUD chrome)
             n, raw = min(circle_vals, key=lambda v: v[0])
         return {
             "clockSec": None,

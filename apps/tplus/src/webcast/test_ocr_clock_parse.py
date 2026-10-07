@@ -65,9 +65,13 @@ def test_nuri_circle_counter() -> None:
     _assert(info["unsignedSec"] == 21, info)
     _assert(info["signSource"] == "circle", info)
 
-    # Near T−0: prefer smallest 1..9 over stray chrome "5"
+    # Near T−0: prefer smallest 0..9 over stray chrome "5"
     info = parse_clock_info(["KIIRIUR", "F5", "1", "5"])
     _assert(info["unsignedSec"] == 1, info)
+    _assert(info["signSource"] == "circle", info)
+
+    info = parse_clock_info(["Hanwha", "0", "5"])
+    _assert(info["unsignedSec"] == 0, info)
     _assert(info["signSource"] == "circle", info)
 
     # Signed T+ still wins over bare numbers
