@@ -7,7 +7,8 @@ script milestones POST to CF **`/suggest`** for **immediate fan-out**:
 | Flag | Audience |
 |------|----------|
 | `--mode test` (default) | Admins only (`🧪 TEST` prefix) |
-| `--mode ops` | All subscribers |
+| `--mode ops` | All subscribers + public Pages feed |
+| `mode=feed` (via `webcast:feed-backfill`) | Pages feed only — **no Telegram** |
 
 ## Setup
 
@@ -54,6 +55,7 @@ npm run webcast:live -- \
 | `webcast:ocr-clock` | Sample VOD frames / `--image` / `--lock` / `--show` HTML |
 | `webcast:schedule` | File clock-lock then wall-clock emit (`--mode test\|ops`) |
 | `webcast:listen` | Offline ASR phrase spotter |
+| `webcast:feed-backfill` | Push archive stills to Pages `/recent` (`mode=feed`, no Telegram) |
 
 ## Weak indicators (v0)
 

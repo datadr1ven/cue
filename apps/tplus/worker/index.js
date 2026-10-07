@@ -3,10 +3,11 @@
  *
  * Always-on: /start · /help · /nextlaunch · /nextlaunches · /status · /stop · inbox.
  * Admins: /note · /broadcast · /inbox · /reply · /subscribers
- * Launch events: desktop webcast:live → POST /suggest (test|ops).
+ * Launch events: desktop webcast:live → POST /suggest (test|ops|feed).
  * Schedule cache: desktop schedule-from-ll2 → POST /schedule-cache → KV.
  *
  * /suggest is mission-agnostic fan-out: the desktop owns LL2/script/OCR.
+ * mode=feed writes the public Pages feed only (no Telegram).
  * Deploy this Worker for code changes only — not when missions change.
  *
  * Bindings (wrangler.toml):
@@ -266,6 +267,58 @@ function normalizeArtifacts(raw) {
 }
 
 /**
+ * Store image bytes in KV for public GET /media/:id.
+ * @param {ArrayBuffer|Uint8Array} buf
+ * @param {string} [contentType]
+ * @returns {Promise<string|null>} media id
+ */
+async function storeFeedImage(kv, buf, contentType = "image/jpeg") {
+  const bytes =
+    buf instanceof ArrayBuffer
+      ? buf
+      : buf?.buffer
+        ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+        : null;
+  if (!bytes || !bytes.byteLength || bytes.byteLength > FEED_IMG_MAX_BYTES) {
+    console.error("feed image size skip", bytes?.byteLength);
+    return null;
+  }
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await kv.put(`${FEED_IMG_KV_PREFIX}${id}`, bytes, {
+    metadata: { contentType: contentType || "image/jpeg" },
+  });
+  return id;
+}
+
+/**
+ * Decode body.imageBase64 (raw base64 or data:image/...;base64,...) to bytes.
+ * @returns {{ buf: ArrayBuffer, contentType: string }|null}
+ */
+function decodeImageBase64(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  let contentType = "image/jpeg";
+  const dataUrl = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(s);
+  if (dataUrl) {
+    contentType = dataUrl[1].toLowerCase();
+    s = dataUrl[2];
+  }
+  s = s.replace(/\s+/g, "");
+  try {
+    const binary = atob(s);
+    const len = binary.length;
+    if (!len || len > FEED_IMG_MAX_BYTES) return null;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return { buf: bytes.buffer, contentType };
+  } catch (e) {
+    console.error("decodeImageBase64", e);
+    return null;
+  }
+}
+
+/**
  * Download a Telegram photo via getFile (server-side; never expose token URLs)
  * and store bytes in KV for public GET /media/:id.
  * @returns {Promise<string|null>} media id
@@ -290,17 +343,9 @@ async function rehostTelegramPhoto(env, kv, fileId) {
       return null;
     }
     const buf = await fileRes.arrayBuffer();
-    if (!buf.byteLength || buf.byteLength > FEED_IMG_MAX_BYTES) {
-      console.error("feed image size skip", buf.byteLength);
-      return null;
-    }
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const contentType =
       fileRes.headers.get("content-type") || "image/jpeg";
-    await kv.put(`${FEED_IMG_KV_PREFIX}${id}`, buf, {
-      metadata: { contentType },
-    });
-    return id;
+    return storeFeedImage(kv, buf, contentType);
   } catch (e) {
     console.error("rehostTelegramPhoto", e);
     return null;
@@ -341,11 +386,13 @@ function formatSuggestAlert(body) {
 
 /**
  * Laptop webcast emitter → immediate fan-out (mission-agnostic).
- * Body.mode: "test" (admins only, default) | "ops" (all subscribers).
+ * Body.mode: "test" (admins only, default) | "ops" (all subscribers) |
+ *   "feed" (public Pages feed only — no Telegram).
  * Auth: Bearer TPLUS_SUGGEST_SECRET
  *
  * Preferred body: { actionId, label, scriptTPlusSec, missionName, mode, artifacts? }
  * Or { text, mode } for a fully preformatted alert.
+ * Optional: imageUrl (https) | imageBase64 (raw or data URL) for feed stills.
  */
 async function handleSuggestPost(request, env, kv) {
   if (!suggestSecretOk(env, request)) {
@@ -369,7 +416,12 @@ async function handleSuggestPost(request, env, kv) {
   }
 
   const modeRaw = String(body.mode || body.audience || "test").toLowerCase();
-  const mode = modeRaw === "ops" || modeRaw === "live" ? "ops" : "test";
+  const mode =
+    modeRaw === "ops" || modeRaw === "live"
+      ? "ops"
+      : modeRaw === "feed" || modeRaw === "web" || modeRaw === "pages"
+        ? "feed"
+        : "test";
   const admins = parseAdminIds(env);
   if (mode === "test" && !admins.length) {
     return new Response("TELEGRAM_ADMIN_IDS not configured", { status: 500 });
@@ -384,14 +436,17 @@ async function handleSuggestPost(request, env, kv) {
     alertText = `🧪 TEST · ${alertText}`;
   }
 
-  const audience =
-    mode === "test" ? admins : await subscriberIds(kv, env);
-  const n = await fanOutTo(env, audience, alertText, { artifacts });
+  let n = 0;
+  if (mode !== "feed") {
+    const audience =
+      mode === "test" ? admins : await subscriberIds(kv, env);
+    n = await fanOutTo(env, audience, alertText, { artifacts });
+  }
 
-  // Public read-only feed for Pages /live — ops only (no 🧪 TEST)
-  if (mode === "ops" && alertText) {
+  // Public read-only feed for Pages /live — ops + feed (no 🧪 TEST)
+  let imageUrl = null;
+  if ((mode === "ops" || mode === "feed") && alertText) {
     try {
-      let imageUrl = null;
       const bodyUrl =
         body?.imageUrl != null && /^https:\/\//i.test(String(body.imageUrl))
           ? String(body.imageUrl).slice(0, 500)
@@ -400,14 +455,27 @@ async function handleSuggestPost(request, env, kv) {
       if (bodyUrl || artUrl) {
         imageUrl = bodyUrl || artUrl;
       } else {
-        const photoId =
-          artifacts.find((a) => a.kind === "photo" && a.fileId)?.fileId ||
-          null;
-        if (photoId) {
-          const mediaId = await rehostTelegramPhoto(env, kv, photoId);
+        const decoded = decodeImageBase64(body?.imageBase64);
+        if (decoded) {
+          const mediaId = await storeFeedImage(
+            kv,
+            decoded.buf,
+            decoded.contentType,
+          );
           if (mediaId) {
             const origin = new URL(request.url).origin;
             imageUrl = `${origin}/media/${mediaId}`;
+          }
+        } else {
+          const photoId =
+            artifacts.find((a) => a.kind === "photo" && a.fileId)?.fileId ||
+            null;
+          if (photoId) {
+            const mediaId = await rehostTelegramPhoto(env, kv, photoId);
+            if (mediaId) {
+              const origin = new URL(request.url).origin;
+              imageUrl = `${origin}/media/${mediaId}`;
+            }
           }
         }
       }
@@ -417,12 +485,13 @@ async function handleSuggestPost(request, env, kv) {
         prev,
         feedEntry({
           text: alertText,
-          source: "suggest",
+          source: mode === "feed" ? "feed-backfill" : "suggest",
           actionId: actionId || null,
           missionName: body?.missionName
             ? String(body.missionName)
             : null,
           imageUrl,
+          t: body?.t || body?.at || null,
         }),
       );
       await kvPutJson(kv, FEED_KV_KEY, next);
@@ -437,6 +506,7 @@ async function handleSuggestPost(request, env, kv) {
     actionId: actionId || null,
     delivered: n,
     artifacts: artifacts.length,
+    imageUrl: imageUrl || null,
     alertText,
   });
 }

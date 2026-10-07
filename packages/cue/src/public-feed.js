@@ -30,13 +30,19 @@ export function normalizeFeed(data) {
  *   actionId?: string|null,
  *   missionName?: string|null,
  *   imageUrl?: string|null,
+ *   t?: string|null,
  * }} fields
  */
 export function feedEntry(fields = {}) {
   const text = String(fields.text || "").trim().slice(0, FEED_TEXT_MAX);
+  let t = new Date().toISOString();
+  if (fields.t != null && String(fields.t).trim()) {
+    const parsed = new Date(String(fields.t).trim());
+    if (!Number.isNaN(parsed.getTime())) t = parsed.toISOString();
+  }
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    t: new Date().toISOString(),
+    t,
     text,
     source: fields.source || "unknown",
   };

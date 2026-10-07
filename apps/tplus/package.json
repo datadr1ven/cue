@@ -13,6 +13,7 @@
     "webcast:vision-eval": "../../.venv-webcast/bin/python src/webcast/vision/eval_enrich.py",
     "webcast:vision-score": "../../.venv-webcast/bin/python src/webcast/vision/score_frame.py",
     "webcast:vision-label-assist": "../../.venv-webcast/bin/python src/webcast/vision/label_assist.py",
+    "webcast:feed-backfill": "node bin/feed-backfill.js",
     "webcast:schedule": "node bin/webcast-schedule.js",
     "webcast:live": "node bin/webcast-live.js",
     "webcast:listen": "node bin/webcast-listen.js",
