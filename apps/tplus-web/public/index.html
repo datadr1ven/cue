@@ -241,12 +241,18 @@
             .slice()
             .reverse()
             .map((it) => {
-              const when = formatWhen(it.t);
+              // Hide wall time for archive backfills (source=feed-backfill);
+              // live ops suggests keep a relative timestamp.
+              const showWhen = it.source !== "feed-backfill";
+              const when = showWhen ? formatWhen(it.t) : "";
+              const whenHtml = when
+                ? `<span class="dim">${esc(when)}</span>`
+                : "";
               const img =
                 it.imageUrl && /^https:\/\//i.test(it.imageUrl)
                   ? `<img class="bubble-img" src="${esc(it.imageUrl)}" alt="" loading="lazy" />`
                   : "";
-              return `<div class="bubble">${img}<div class="bubble-text">${esc(it.text)}</div><span class="dim">${esc(when)}</span></div>`;
+              return `<div class="bubble">${img}<div class="bubble-text">${esc(it.text)}</div>${whenHtml}</div>`;
             })
             .join("");
       }
