@@ -54,12 +54,35 @@ def test_no_false_positive_on_telemetry() -> None:
     _assert(info["unsignedSec"] is None, info)
 
 
+def test_nuri_circle_counter() -> None:
+    # Final ~90s big circle — whole OCR lines are just the seconds.
+    info = parse_clock_info(["KRI", "91", "5"])
+    _assert(info["unsignedSec"] == 91, info)
+    _assert(info["signSource"] == "circle", info)
+    _assert(info["clockSec"] is None, info)
+
+    info = parse_clock_info(["Hanwha", "21", "5大"])
+    _assert(info["unsignedSec"] == 21, info)
+    _assert(info["signSource"] == "circle", info)
+
+    # Near T−0: prefer smallest 1..9 over stray chrome "5"
+    info = parse_clock_info(["KIIRIUR", "F5", "1", "5"])
+    _assert(info["unsignedSec"] == 1, info)
+    _assert(info["signSource"] == "circle", info)
+
+    # Signed T+ still wins over bare numbers
+    info = parse_clock_info(["25", "Hanwha", "+00:08"])
+    _assert(info["clockSec"] == 8, info)
+    _assert(info["signSource"] == "signed", info)
+
+
 def main() -> int:
     test_spacex_classic()
     test_nasa_bare()
     test_nuri_signed_mmss()
     test_t_prefix_short()
     test_no_false_positive_on_telemetry()
+    test_nuri_circle_counter()
     print("ok — parse_clock_info cases passed")
     return 0
 

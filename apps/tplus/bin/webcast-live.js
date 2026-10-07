@@ -351,6 +351,14 @@ function createClockBelief() {
         return commitSigned(clockSec, wallMs, stall, stall > 0 ? 0.85 : 0.9);
       }
 
+      // Final ~90s circle counter (bare "91","81",…) — always countdown
+      if (opts.signSource === "circle" && unsigned != null) {
+        dir = "countdown";
+        dirVotes = DIR_VOTES_NEEDED;
+        lastSample = { magSec: unsigned, wallMs, signed: false };
+        return commitSigned(-unsigned, wallMs, 0, 0.8, "ocr");
+      }
+
       // Bare magnitude — need motion to infer sign
       if (unsigned == null) return belief;
 

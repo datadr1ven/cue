@@ -50,6 +50,9 @@ SIGNED_SHORT_RE = re.compile(
 )
 # NASA+/Roscosmos-style countdown without T± (e.g. "00:04:11")
 BARE_CLOCK_RE = re.compile(r"\b(\d{1,2}):(\d{2}):(\d{2})\b")
+# Final ~90s circle counter: a whole OCR line that is just 1..120
+CIRCLE_LINE_RE = re.compile(r"^(\d{1,3})$")
+CIRCLE_MAX_SEC = 120
 EVENT_HINTS = re.compile(
     r"\b(MAX\s*Q|MAXQ|MECO|BECO|STAGE\s*SEP|HOT\s*STAG|ENTRY\s*BURN|"
     r"LANDING\s*BURN|LIFTOFF|LIFT\s*OFF|FAIRING|SECO)\b",
@@ -82,12 +85,14 @@ def parse_clock_info(texts: list[str]) -> dict:
     Prefer explicit T±HH:MM:SS (SpaceX). Also accept T±MM:SS and signed
     ±MM:SS / ±H:MM:SS without a leading T (KASA/Nuri HUDs). Fall back to
     bare HH:MM:SS (NASA+) as unsigned magnitude — caller infers sign from motion.
+    Final ~90s circle counters (whole line "91", "81", …) return unsigned with
+    signSource "circle" — webcast-live treats those as countdown.
 
     Returns dict:
       clockSec: signed seconds if a signed form present, else None
       unsignedSec: |clock| magnitude when any clock found
       raw: matched string
-      signSource: "signed" | "bare" | None
+      signSource: "signed" | "bare" | "circle" | None
     """
     joined = " ".join(texts)
     compact = re.sub(r"\s+", "", joined.upper())
@@ -151,6 +156,30 @@ def parse_clock_info(texts: list[str]) -> dict:
             "unsignedSec": sec,
             "raw": bm.group(0),
             "signSource": "bare",
+        }
+
+    # 5) Circle second counter — whole OCR lines that are just 1..120
+    circle_vals: list[tuple[int, str]] = []
+    for t in texts:
+        m = CIRCLE_LINE_RE.match((t or "").strip())
+        if not m:
+            continue
+        n = int(m.group(1))
+        if 1 <= n <= CIRCLE_MAX_SEC:
+            circle_vals.append((n, m.group(1)))
+    if circle_vals:
+        two_digit = [v for v in circle_vals if v[0] >= 10]
+        if two_digit:
+            # Prefer the prominent countdown (e.g. "91" over stray "5")
+            n, raw = max(two_digit, key=lambda v: v[0])
+        else:
+            # Near T−0: prefer the smallest 1..9 (stray "5" from HUD chrome)
+            n, raw = min(circle_vals, key=lambda v: v[0])
+        return {
+            "clockSec": None,
+            "unsignedSec": n,
+            "raw": raw,
+            "signSource": "circle",
         }
 
     return {
