@@ -120,12 +120,18 @@ def _score(path: Path) -> dict:
         landing_burn = min(1.0, warm_lower * 2.5 * (0.4 + 0.6 * sweet) * (0.5 + 0.5 * sharp_n))
 
     structure = min(1.0, std_gray / 55.0)
+    # Prefer readable mid-contrast over busy max-std (HUD chrome / clutter)
+    # Human coast picks often sit ~25–50 std; model used to chase 70–90.
+    structure_sweet = float(
+        max(0.0, 1.0 - abs(std_gray - 40.0) / 45.0)
+    )
     # vehicle_air: structure without much plume — keep weak so it rarely wins rank
     vehicle_air = max(
-        0.0, structure * 0.55 * (1.0 - min(1.0, warm_center * 3.0)) - hud_heavy * 0.35
+        0.0,
+        structure_sweet * 0.55 * (1.0 - min(1.0, warm_center * 3.0)) - hud_heavy * 0.35,
     )
-    pad_or_tower = max(0.0, (1.0 - plume_on) * structure * 0.45)
-    plume_off = max(0.0, structure * 0.35 - plume_on * 0.8)
+    pad_or_tower = max(0.0, (1.0 - plume_on) * structure_sweet * 0.45)
+    plume_off = max(0.0, structure_sweet * 0.35 - plume_on * 0.8)
 
     scores = {
         "plume_on": round(min(1.0, plume_on), 4),
