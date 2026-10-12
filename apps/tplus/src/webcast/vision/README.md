@@ -12,10 +12,13 @@ vision/
   extract_windows.py   # dense frames around milestone emits (yt-dlp -g / ffmpeg)
   label_assist.py      # stratified sample + review.html for gold labels
   pick_best.py         # per-milestone "best alert still" picker (preferred gold)
+  batch_score.py       # OpenCV 5 batch scorer (local or Graviton)
+  eval_picks.py        # top-k vs human picks.jsonl
   labels.schema.json   # gold JSONL schema
   score_frame.py       # OpenCV baseline scorer (heuristics)
   eval_enrich.py       # rank frames in an emit window
-  requirements.txt     # opencv-python-headless, …
+  aws/                 # S3 sync + host batch wrappers (contest AWS slice)
+  requirements.txt     # opencv-python-headless>=5
   samples/             # optional tiny fixtures (not full flights)
 ```
 
@@ -77,6 +80,20 @@ Scene tags were a first cut and are easy to overthink. Prefer **picks.jsonl** (�
 `(liftoff_wall − media_up_wall)` from the run archive (works when the VOD  
 starts near webcast go-live).
 
-## AWS (later)
+## AWS batch (contest stub)
 
-Upload `runs/<id>/vision/` to S3 and run `score_frame.py` in batch on Graviton/OpenCV 5; pull score JSON for `eval_enrich.py`. Keep OpenCV as the analysis core — not a cloud-only black box.
+See [`aws/README.md`](./aws/README.md). Short version:
+
+```bash
+export TPLUS_VISION_BUCKET=tplus-vision-<you>
+./apps/tplus/src/webcast/vision/aws/sync_to_s3.sh ~/cue/tplus-webcast/runs/<runId>
+# on Graviton (or locally):
+./apps/tplus/src/webcast/vision/aws/run_batch_on_host.sh ~/cue/tplus-webcast/runs/<runId>
+```
+
+Local smoke (same scorer):
+
+```bash
+.venv-webcast/bin/python apps/tplus/src/webcast/vision/batch_score.py \
+  --run-dir ~/cue/tplus-webcast/runs/<runId>
+```

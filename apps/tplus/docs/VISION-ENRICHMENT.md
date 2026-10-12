@@ -92,7 +92,7 @@ Local-only OpenCV is fine for iteration; contest submission must show AWS in the
 | 3 | Label 200–500 frames (v0 labels) | human + light assist | `labels.jsonl` checked in or private gold |
 | 4 | OpenCV baseline (color/motion/HUD heuristics → labels) | code | beats random on eval |
 | 5 | Optional tiny classifier (OpenCV DNN / ONNX) if heuristics plateau | code | measurable lift |
-| 6 | AWS batch path + README | code | reproducible from clean checkout |
+| 6 | AWS batch path + README | code | `vision/aws/` + `batch_score.py` (S3 sync + Graviton host) |
 | 7 | Demo video + Devpost writeup | you | before **2026-10-26** |
 
 Scaffold for 2–4 lives in `apps/tplus/src/webcast/vision/` (this pass).
