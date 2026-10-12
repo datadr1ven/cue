@@ -14,9 +14,22 @@ s3://$TPLUS_VISION_BUCKET/tplus-vision/
   runs/<runId>/vision/scores.summary.json
 ```
 
+## Staying cheap / Free Tier–friendly (2026)
+
+New AWS accounts (post–July 2025) usually get **~$100–200 credits for ~6 months** rather than the old “750 h of t3.micro forever.” Credits cover small S3 + a short Graviton run easily.
+
+**Also useful:** EC2 **t4g.small** Graviton2 free trial — up to **750 h/month through Dec 31, 2026** ([Graviton getting started](https://aws.amazon.com/ec2/graviton/getting-started/)). Prefer that size for the contest demo.
+
+**Hygiene so you don’t burn credits:**
+- Region: `us-west-2` or `us-east-1` (pick one; stick to it)
+- Create a **Budget alert** at $5–10 (onboarding credit task + peace of mind)
+- **Stop/terminate** the instance when scoring is done (don’t leave it up)
+- Keep S3 to our vision packs only (~hundreds of MB), delete when contest ends if you want
+- Skip NAT gateways, load balancers, RDS, public AMIs with huge disks
+
 ## One-time setup
 
-1. Create a bucket (any region; example `us-west-2`):
+1. Create a bucket (example `us-west-2`):
 
 ```bash
 export TPLUS_VISION_BUCKET=tplus-vision-<your-uniq>
@@ -31,8 +44,9 @@ aws s3 mb "s3://$TPLUS_VISION_BUCKET" --region "$AWS_REGION"
 | | |
 |--|--|
 | AMI | Amazon Linux 2023 **arm64** |
-| Type | `t4g.small` (or `c7g.large` if scoring many packs) |
-| Storage | ≥20 GB if you sync several flights |
+| Type | **`t4g.small`** (free-trial eligible through end of 2026) |
+| Storage | **8–20 GB** gp3 is enough for a couple of flights |
+| Access | SSH key; security group: SSH from your IP only |
 
 4. On the instance:
 
