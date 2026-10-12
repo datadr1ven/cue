@@ -154,15 +154,17 @@ def _score(path: Path) -> dict:
             primary = "hud_heavy"
 
     # Enrichment rank = "would this make a good alert still?"
-    # Prefer: sweet-spot plume, sharpness, some structure; penalize HUD / junk / blowouts.
+    # Prefer: sweet-spot plume, sharpness, mid contrast; penalize HUD / junk / blowouts.
     label_prior = RANK_WEIGHT.get(primary, 0.3)
+    coast = 1.0 - min(1.0, warm_center * 4.0)  # high when little plume
     rank = (
-        0.34 * sweet
-        + 0.22 * sharp_n
-        + 0.14 * min(1.0, structure)
-        + 0.12 * label_prior
-        + 0.10 * min(1.0, scores["landing_burn"])
-        + 0.08 * min(1.0, scores["plume_on"])
+        0.32 * sweet
+        + 0.20 * sharp_n
+        + 0.10 * min(1.0, structure)
+        + 0.14 * structure_sweet * coast  # coast/sep: readable, not busy
+        + 0.10 * label_prior
+        + 0.08 * min(1.0, scores["landing_burn"])
+        + 0.06 * min(1.0, scores["plume_on"])
         - 0.28 * scores["hud_heavy"]
         - 0.55 * scores["low_value"]
     )
