@@ -11,6 +11,7 @@ vision/
   README.md
   extract_windows.py   # dense frames around milestone emits (yt-dlp -g / ffmpeg)
   label_assist.py      # stratified sample + review.html for gold labels
+  pick_best.py         # per-milestone "best alert still" picker (preferred gold)
   labels.schema.json   # gold JSONL schema
   score_frame.py       # OpenCV baseline scorer (heuristics)
   eval_enrich.py       # rank frames in an emit window
@@ -49,7 +50,28 @@ vision/
   --gold-dir /path/to/tplus-webcast/vision-gold
 # open vision-gold/index.html (or each run's vision/review.html),
 # correct labels, download labels.jsonl → save as runs/<id>/vision/labels.jsonl
+
+# 4) Best still per milestone (product-shaped gold — recommended)
+.venv-webcast/bin/python apps/tplus/src/webcast/vision/pick_best.py \
+  --run-dir /path/to/tplus-webcast/runs/<runId>
+# serve vision/, open pick_best.html, click one winner per action → picks.jsonl
 ```
+
+### What the labels mean (intuition)
+
+Scene tags were a first cut and are easy to overthink. Prefer **picks.jsonl** (“best alert still”) for enrichment eval.
+
+| Tag | Intuition | When to use |
+|-----|-----------|-------------|
+| `plume_on` | Bright exhaust / flame is the point of the shot | Liftoff plume, landing burn fire |
+| `landing_burn` | Boostback / landing burn look (flame + descent vibe) | Landing windows |
+| `pad_or_tower` | Ground / tower / ship deck dominates | Pre-liftoff pad |
+| `plume_off` | Airborne but engines dark / coast | SECO coast, stage alone |
+| `vehicle_air` | **Catch-all:** stack clearly in flight, no strong plume — easy to abuse; avoid unless nothing else fits | Rare |
+| `hud_heavy` | Big telemetry graphic / animation, not a useful photo | Replay cards |
+| `low_value` | Black, blur, logo, useless as an alert thumb | Skip |
+
+**Better gold for TPlus:** for each event, pick the one frame you’d put on the bubble — timestamps/best-frame, not a taxonomy essay.
 
 `extract_windows.py` anchors T+0 using `--liftoff-video-sec`, or estimates  
 `(liftoff_wall − media_up_wall)` from the run archive (works when the VOD  
