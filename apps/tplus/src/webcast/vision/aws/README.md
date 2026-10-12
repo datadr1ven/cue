@@ -21,7 +21,7 @@ New AWS accounts (post–July 2025) usually get **~$100–200 credits for ~6 mon
 **Also useful:** EC2 **t4g.small** Graviton2 free trial — up to **750 h/month through Dec 31, 2026** ([Graviton getting started](https://aws.amazon.com/ec2/graviton/getting-started/)). Prefer that size for the contest demo.
 
 **Hygiene so you don’t burn credits:**
-- Region: `us-west-2` or `us-east-1` (pick one; stick to it)
+- Region: pick one and stick to it (this project: **`us-east-2`** / bucket `tplus-vision-scenicmind`)
 - Create a **Budget alert** at $5–10 (onboarding credit task + peace of mind)
 - **Stop/terminate** the instance when scoring is done (don’t leave it up)
 - Keep S3 to our vision packs only (~hundreds of MB), delete when contest ends if you want

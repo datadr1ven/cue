@@ -29,7 +29,7 @@ echo "python=$PY"
 if [[ -n "${TPLUS_VISION_BUCKET:-}" ]]; then
   BUCKET=$TPLUS_VISION_BUCKET
   PREFIX=${TPLUS_VISION_PREFIX:-tplus-vision}
-  REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-west-2}}
+  REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}
   RUN_ID=$(basename "$RUN_DIR")
   DEST="s3://${BUCKET}/${PREFIX}/runs/${RUN_ID}/vision/"
   echo "→ upload scores to $DEST"

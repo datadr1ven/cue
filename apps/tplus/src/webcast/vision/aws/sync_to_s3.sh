@@ -7,7 +7,7 @@ RUN_DIR=$(cd "$RUN_DIR" && pwd)
 RUN_ID=$(basename "$RUN_DIR")
 BUCKET=${TPLUS_VISION_BUCKET:?set TPLUS_VISION_BUCKET}
 PREFIX=${TPLUS_VISION_PREFIX:-tplus-vision}
-REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-west-2}}
+REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}
 
 if ! command -v aws >/dev/null 2>&1; then
   echo "aws CLI not found" >&2
