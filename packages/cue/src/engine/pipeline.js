@@ -104,7 +104,37 @@ export function createPipeline(configOverrides = {}) {
       nowMs,
     );
     state = next;
-    const moments = gate.filter(rawMoments, null);
+
+    // flushExpiredPits may stage race finish onto `_raceFinishEmit` (wall-clock
+    // backup when TimingData goes quiet after CHEQUERED). That path never runs
+    // detectMoments — and the next reduce() clears `_raceFinishEmit` — so live
+    // SignalR races (Austin/Singapore '26) armed the finish then silently
+    // dropped it. Convert staged emits here before they evaporate.
+    /** @type {import('./types.js').Moment[]} */
+    let staged = [];
+    if (
+      state &&
+      (state._raceFinishEmit || state._retirementEmit) &&
+      typeof domain.detectMoments === "function"
+    ) {
+      const flushEvent = {
+        type: "f1.flush",
+        t:
+          state.lastEventT ||
+          state._raceFinishEmit?.eventT ||
+          new Date(nowMs).toISOString(),
+        payload: {},
+        source: "flush",
+      };
+      staged = domain.detectMoments(state, state, flushEvent) || [];
+      state = {
+        ...state,
+        _raceFinishEmit: null,
+        _retirementEmit: null,
+      };
+    }
+
+    const moments = gate.filter([...(rawMoments || []), ...staged], null);
     /** @type {import('./types.js').Alert[]} */
     const alerts = [];
     for (const moment of moments) {
