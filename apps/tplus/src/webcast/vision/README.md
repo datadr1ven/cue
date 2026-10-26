@@ -4,6 +4,12 @@ Offline OpenCV helpers for **frame enrichment** around TPlus milestones.
 
 See [`docs/VISION-ENRICHMENT.md`](../../../docs/VISION-ENRICHMENT.md) for the plan and contest notes.
 
+**Contest technical report:** [`CONTEST-REPORT.md`](./CONTEST-REPORT.md) (OpenCV AI Competition 2026).
+
+**Shows-event (post/don’t post) campaign:** [`LABEL-CAMPAIGN-SHOWS-EVENT.md`](./LABEL-CAMPAIGN-SHOWS-EVENT.md).
+
+**Override labeling campaign:** [`LABEL-CAMPAIGN-OVERRIDE.md`](./LABEL-CAMPAIGN-OVERRIDE.md) (MECO / stage sep as lag signals).
+
 ## Layout
 
 ```

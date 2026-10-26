@@ -4,7 +4,7 @@
 
 **Contest:** [OpenCV AI Competition 2026 (AWS)](https://opencv26.devpost.com/) · final due **2026-10-26** · requires substantive **OpenCV 5** + a meaningful **AWS** component.
 
-**Related:** [SENSORS.md](./SENSORS.md) · [EVENT-RULES.md](./EVENT-RULES.md) · scaffold under `src/webcast/vision/`.
+**Related:** [SENSORS.md](./SENSORS.md) · [EVENT-RULES.md](./EVENT-RULES.md) · scaffold under `src/webcast/vision/` · **[CONTEST-REPORT.md](../src/webcast/vision/CONTEST-REPORT.md)** (submission technical report).
 
 ---
 
