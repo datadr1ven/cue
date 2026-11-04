@@ -6,6 +6,8 @@ See [`docs/VISION-ENRICHMENT.md`](../../../docs/VISION-ENRICHMENT.md) for the pl
 
 **Contest technical report:** [`CONTEST-REPORT.md`](./CONTEST-REPORT.md) (OpenCV AI Competition 2026).
 
+
+**Public feed still hygiene:** [`feed_cleanup.py`](./feed_cleanup.py) + `npm run webcast:feed-cleanup -w tplus` strips black/HUD/wrong-phase `imageUrl`s from the Pages feed (text kept). Safe for daily cron.
 **Shows-event (post/don’t post) campaign:** [`LABEL-CAMPAIGN-SHOWS-EVENT.md`](./LABEL-CAMPAIGN-SHOWS-EVENT.md).
 
 **Override labeling campaign:** [`LABEL-CAMPAIGN-OVERRIDE.md`](./LABEL-CAMPAIGN-OVERRIDE.md) (MECO / stage sep as lag signals).

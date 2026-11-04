@@ -16,6 +16,7 @@
     "webcast:vision-pick-best": "../../.venv-webcast/bin/python src/webcast/vision/pick_best.py",
     "webcast:vision-batch-score": "../../.venv-webcast/bin/python src/webcast/vision/batch_score.py",
     "webcast:feed-backfill": "node bin/feed-backfill.js",
+    "webcast:feed-cleanup": "bash scripts/feed-cleanup.sh",
     "webcast:schedule": "node bin/webcast-schedule.js",
     "webcast:live": "node bin/webcast-live.js",
     "webcast:listen": "node bin/webcast-listen.js",
