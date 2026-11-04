@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Daily (or on-demand) cleanup of TPlus public feed stills.
+# Daily (or on-demand) cleanup of the TPlus public Pages feed.
 #
-# Uses OpenCV heuristics to strip imageUrl from black / HUD / wrong-phase
-# frames. Text alerts stay. Requires wrangler login + .venv-webcast OpenCV.
+# Uses OpenCV heuristics to strip/drop black / HUD / wrong-phase stills, then
+# by default drops text-only items so the page stays image-forward.
+# Telegram is untouched — this only edits KV feed:v1.
+# Requires wrangler login + .venv-webcast OpenCV.
 #
 #   ./apps/tplus/scripts/feed-cleanup.sh           # apply
 #   ./apps/tplus/scripts/feed-cleanup.sh --dry-run
@@ -12,11 +14,14 @@
 set -euo pipefail
 
 DRY_RUN=0
+KEEP_TEXT_ONLY=0
+EXTRA_ARGS=()
 for a in "$@"; do
   case "$a" in
     --dry-run|-n) DRY_RUN=1 ;;
+    --keep-text-only) KEEP_TEXT_ONLY=1; EXTRA_ARGS+=(--keep-text-only) ;;
     --help|-h)
-      sed -n '2,12p' "$0"
+      sed -n '2,14p' "$0"
       exit 0
       ;;
   esac
@@ -84,7 +89,7 @@ fi
 
 REPORT="$LOG_DIR/feed-cleanup-$STAMP.jsonl"
 OUT="$WORK/feed-clean.json"
-ARGS=(--feed "$WORK/feed.json" --out "$OUT" --report "$REPORT" --work-dir "$WORK/imgs")
+ARGS=(--feed "$WORK/feed.json" --out "$OUT" --report "$REPORT" --work-dir "$WORK/imgs" "${EXTRA_ARGS[@]}")
 if [[ "$DRY_RUN" -eq 1 ]]; then
   ARGS+=(--dry-run)
 fi
@@ -96,12 +101,12 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
-STRIPPED=$(python3 -c "import json;print(json.load(open('$LOG_DIR/feed-cleanup-$STAMP.summary.json')).get('stripped',0))")
-if [[ "${STRIPPED:-0}" -eq 0 ]]; then
-  echo "[feed-cleanup] nothing to strip"
+CHANGED=$(python3 -c "import json;d=json.load(open('$LOG_DIR/feed-cleanup-$STAMP.summary.json')); print(d.get('changed', d.get('stripped',0)))")
+if [[ "${CHANGED:-0}" -eq 0 ]]; then
+  echo "[feed-cleanup] nothing to change"
   exit 0
 fi
 
 npx wrangler kv key put "feed:v1" --namespace-id "$NS_ID" --remote --path "$OUT"
-echo "[feed-cleanup] wrote feed:v1 (stripped=$STRIPPED)"
+echo "[feed-cleanup] wrote feed:v1 (changed=$CHANGED)"
 echo "[feed-cleanup] report $REPORT"

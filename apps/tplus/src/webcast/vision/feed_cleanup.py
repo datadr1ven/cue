@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Strip non-showing / cruft stills from the public TPlus Pages feed.
+"""Keep the public TPlus Pages feed visually pretty.
 
-Fetches (or reads) feed JSON, downloads each imageUrl, scores with OpenCV 5
-heuristics, and removes imageUrl when the still is unlikely to depict the
-named milestone (black frames, HUD cards, pad-only for in-flight events, etc.).
+1. Score each still with OpenCV 5; strip imageUrl when the frame is black,
+   HUD-heavy, or pad-only for an in-flight milestone.
+2. By default, **drop items with no imageUrl** so the Pages wall is not a
+   run of text-only bubbles (Telegram delivery is unchanged — this only
+   edits the public KV feed).
 
-Text alerts are kept. Designed for daily cron via scripts/feed-cleanup.sh.
+Designed for daily cron via scripts/feed-cleanup.sh.
 
   python feed_cleanup.py --feed feed.json --out feed-clean.json
   python feed_cleanup.py --feed-url https://tplus…/recent?limit=50 --out …
+  python feed_cleanup.py … --keep-text-only   # only strip bad images
 """
 
 from __future__ import annotations
@@ -108,6 +111,7 @@ def cleanup_feed(
     *,
     work_dir: Path,
     dry_run: bool = False,
+    drop_text_only: bool = True,
 ) -> tuple[dict, list[dict]]:
     items = list(feed.get("items") or [])
     actions: list[dict] = []
@@ -116,7 +120,21 @@ def cleanup_feed(
     for i, it in enumerate(items):
         url = it.get("imageUrl")
         if not url or not str(url).startswith("https://"):
-            new_items.append(it)
+            if drop_text_only:
+                actions.append(
+                    {
+                        "id": it.get("id"),
+                        "actionId": it.get("actionId"),
+                        "missionName": it.get("missionName"),
+                        "reason": "no_image",
+                        "drop": True,
+                    }
+                )
+                if dry_run:
+                    new_items.append(it)
+                # else: omit from feed
+            else:
+                new_items.append(it)
             continue
 
         mid = str(url).rstrip("/").split("/")[-1]
@@ -134,6 +152,9 @@ def cleanup_feed(
             )
             if dry_run:
                 new_items.append(it)
+            elif drop_text_only:
+                actions[-1]["drop"] = True
+                # omit item
             else:
                 cleaned = dict(it)
                 cleaned.pop("imageUrl", None)
@@ -153,10 +174,13 @@ def cleanup_feed(
                     "reason": reason,
                     "primary": primary,
                     "rank": round(rank, 3),
+                    "drop": bool(drop_text_only),
                 }
             )
             if dry_run:
                 new_items.append(it)
+            elif drop_text_only:
+                pass  # omit item entirely from public feed
             else:
                 cleaned = dict(it)
                 cleaned.pop("imageUrl", None)
@@ -190,7 +214,12 @@ def main() -> int:
         type=Path,
         help="Write JSONL of strip actions",
     )
-    ap.add_argument("--dry-run", action="store_true", help="Score only; do not strip")
+    ap.add_argument("--dry-run", action="store_true", help="Score only; do not modify feed")
+    ap.add_argument(
+        "--keep-text-only",
+        action="store_true",
+        help="Only strip bad imageUrls; keep text-only alerts on the Pages feed",
+    )
     ap.add_argument(
         "--work-dir",
         type=Path,
@@ -212,7 +241,13 @@ def main() -> int:
     work = args.work_dir or Path(tempfile.mkdtemp(prefix="tplus-feed-clean-"))
     work.mkdir(parents=True, exist_ok=True)
 
-    cleaned, actions = cleanup_feed(feed, work_dir=work, dry_run=args.dry_run)
+    drop_text_only = not args.keep_text_only
+    cleaned, actions = cleanup_feed(
+        feed,
+        work_dir=work,
+        dry_run=args.dry_run,
+        drop_text_only=drop_text_only,
+    )
     args.out.write_text(json.dumps(cleaned, ensure_ascii=False))
     if args.report:
         args.report.write_text(
@@ -220,18 +255,26 @@ def main() -> int:
             + ("\n" if actions else "")
         )
 
-    before = sum(1 for i in (feed.get("items") or []) if i.get("imageUrl"))
-    after = sum(1 for i in cleaned["items"] if i.get("imageUrl"))
+    before_items = len(feed.get("items") or [])
+    before_imgs = sum(1 for i in (feed.get("items") or []) if i.get("imageUrl"))
+    after_items = len(cleaned["items"])
+    after_imgs = sum(1 for i in cleaned["items"] if i.get("imageUrl"))
+    dropped = sum(1 for a in actions if a.get("drop"))
     mode = "dry-run" if args.dry_run else "apply"
     print(
         json.dumps(
             {
                 "ok": True,
                 "mode": mode,
-                "imagesBefore": before,
-                "imagesAfter": after if not args.dry_run else before,
-                "wouldStrip": len(actions),
-                "stripped": 0 if args.dry_run else len(actions),
+                "dropTextOnly": drop_text_only,
+                "itemsBefore": before_items,
+                "itemsAfter": after_items if not args.dry_run else before_items,
+                "imagesBefore": before_imgs,
+                "imagesAfter": after_imgs if not args.dry_run else before_imgs,
+                "wouldChange": len(actions),
+                "changed": 0 if args.dry_run else len(actions),
+                "wouldDropItems": dropped,
+                "droppedItems": 0 if args.dry_run else dropped,
                 "actions": actions,
             },
             indent=2,
