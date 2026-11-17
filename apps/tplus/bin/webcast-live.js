@@ -38,6 +38,20 @@ import {
 } from "../src/webcast/tg-upload.js";
 import { loadScriptDocFromLl2 } from "../src/missions/ll2.js";
 import { createRunArchive } from "../src/webcast/run-archive.js";
+import {
+  ASCENT_MAX_TPLUS_SEC,
+  createClockBelief,
+  filterScriptByPhase,
+} from "../src/webcast/clock_belief.js";
+
+/** Catch-up defense: skip milestones more overdue than this (seconds). */
+const MAX_CATCHUP_OVERDUE_SEC = Number(
+  process.env.TPLUS_MAX_CATCHUP_OVERDUE_SEC || 120,
+);
+/** Catch-up defense: max milestones fired per OCR/pass. */
+const MAX_CATCHUP_PER_PASS = Number(
+  process.env.TPLUS_MAX_CATCHUP_PER_PASS || 3,
+);
 
 const APP_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 /** Monorepo root (apps/tplus → ../..) — .venv-webcast lives here */
@@ -78,6 +92,9 @@ function parseArgs(argv) {
     adminId: process.env.TELEGRAM_ADMIN_IDS?.split(",")[0]?.trim() || null,
     syncFileT: 0,
     leadSec: 0,
+    /** @type {"ascent"|"return"|"all"} */
+    phase: "all",
+    ascentMaxTPlusSec: ASCENT_MAX_TPLUS_SEC,
     /** @type {string|null|false} false=off; null=default path; string=parent dir */
     saveRun: null,
     saveFrames: true,
@@ -123,7 +140,12 @@ function parseArgs(argv) {
     else if (a === "--suggest-secret") out.suggestSecret = next();
     else if (a === "--sync-file-t") out.syncFileT = Number(next());
     else if (a === "--lead-sec") out.leadSec = Number(next());
-    else if (a === "--help" || a === "-h") out.help = true;
+    else if (a === "--phase") {
+      const p = String(next() || "all").toLowerCase();
+      out.phase = p === "ascent" || p === "return" ? p : "all";
+    } else if (a === "--ascent-max-tplus-sec") {
+      out.ascentMaxTPlusSec = Number(next());
+    } else if (a === "--help" || a === "-h") out.help = true;
   }
   const m = String(out.mode || "test").toLowerCase();
   out.mode = m === "ops" || m === "live" ? "ops" : "test";
@@ -148,6 +170,11 @@ POST milestones to CF /suggest for immediate fan-out.
   --mode test       admins only (default; safe rehearsal)
   --mode ops        all subscribers
   --test / --ops    aliases
+  --phase ascent|return|all
+                    ascent: only milestones ≤ ~4h T+ (default cron desk)
+                    return: only milestones > ~4h T+ (next-day catch desk)
+                    all: no filter (manual / short missions; default)
+  --ascent-max-tplus-sec N   split threshold (default 14400)
 
 Env: TPLUS_SUGGEST_URL, TPLUS_SUGGEST_SECRET, TELEGRAM_TOKEN, TELEGRAM_ADMIN_IDS
      LL2_TOKEN (optional; free tier is 15 req/hour/IP)
@@ -298,168 +325,6 @@ function formatMissionClock(tPlusSec) {
   return `T${sign}${m}:${String(s).padStart(2, "0")}`;
 }
 
-/**
- * Hold-aware clock belief.
- * SpaceX HUDs deliver signed T± via OCR. NASA+/bare HH:MM:SS deliver magnitude
- * only — we lock direction from motion (countdown→T−, countup→T+) after a few
- * agreeing samples before coast/emit.
- */
-function createClockBelief() {
-  /** @type {{ tPlusSec: number, asOfWallMs: number, source: string, stallMs: number, liftoffWallMs: number|null, confidence: number, dir?: string }|null} */
-  let belief = null;
-  /** @type {{ magSec: number, wallMs: number, signed: boolean }|null} */
-  let lastSample = null;
-  /** @type {"countdown"|"countup"|null} */
-  let dir = null;
-  let dirVotes = 0; // consecutive agreeing motion samples toward dir lock
-  const DIR_VOTES_NEEDED = 2;
-
-  function commitSigned(tPlusSec, wallMs, stallMs, confidence, source = "ocr") {
-    belief = {
-      tPlusSec,
-      asOfWallMs: wallMs,
-      source,
-      stallMs,
-      liftoffWallMs: wallMs - tPlusSec * 1000,
-      confidence,
-      dir: dir || (tPlusSec < 0 ? "countdown" : "countup"),
-    };
-    return belief;
-  }
-
-  return {
-    /**
-     * @param {number|null|undefined} clockSec signed T± seconds, or null
-     * @param {number} [wallMs]
-     * @param {{ unsignedSec?: number|null, signSource?: string|null }} [opts]
-     */
-    updateFromOcr(clockSec, wallMs = Date.now(), opts = {}) {
-      const unsigned =
-        opts.unsignedSec != null && Number.isFinite(opts.unsignedSec)
-          ? Number(opts.unsignedSec)
-          : null;
-
-      // Explicit T± — lock direction immediately
-      if (clockSec != null && Number.isFinite(clockSec)) {
-        dir = clockSec < 0 ? "countdown" : "countup";
-        dirVotes = DIR_VOTES_NEEDED;
-        const stall =
-          lastSample && Math.abs(Math.abs(clockSec) - lastSample.magSec) < 0.5
-            ? wallMs - lastSample.wallMs
-            : 0;
-        lastSample = { magSec: Math.abs(clockSec), wallMs, signed: true };
-        return commitSigned(clockSec, wallMs, stall, stall > 0 ? 0.85 : 0.9);
-      }
-
-      // Final ~90s circle counter (bare "91","81",…) — always countdown
-      if (opts.signSource === "circle" && unsigned != null) {
-        dir = "countdown";
-        dirVotes = DIR_VOTES_NEEDED;
-        lastSample = { magSec: unsigned, wallMs, signed: false };
-        return commitSigned(-unsigned, wallMs, 0, 0.8, "ocr");
-      }
-
-      // Bare magnitude — need motion to infer sign
-      if (unsigned == null) return belief;
-
-      if (!lastSample) {
-        lastSample = { magSec: unsigned, wallMs, signed: false };
-        return belief; // no dir yet
-      }
-
-      const prevMag = lastSample.magSec;
-      const dMag = unsigned - prevMag;
-      const dWall = (wallMs - lastSample.wallMs) / 1000;
-
-      // Hold / noise
-      if (Math.abs(dMag) < 0.5) {
-        lastSample = { magSec: unsigned, wallMs, signed: false };
-        if (belief && dir) {
-          belief = {
-            ...belief,
-            stallMs: (belief.stallMs || 0) + Math.max(0, dWall) * 1000,
-            asOfWallMs: wallMs,
-            tPlusSec: (dir === "countdown" ? -1 : 1) * unsigned,
-          };
-        }
-        return belief;
-      }
-
-      // Reject OCR jumps (≫ wall elapsed)
-      if (dWall > 0.2 && Math.abs(dMag) > Math.max(8, 3 * dWall)) {
-        return belief; // keep lastSample
-      }
-
-      lastSample = { magSec: unsigned, wallMs, signed: false };
-
-      // Motion vote
-      let vote = null;
-      if (dWall > 0.2) {
-        if (dMag < -0.5) vote = "countdown";
-        else if (dMag > 0.5) vote = "countup";
-      }
-      // Near-zero flip: was counting down through liftoff
-      if (
-        dir === "countdown" &&
-        vote === "countup" &&
-        unsigned < 30 &&
-        prevMag < 60
-      ) {
-        dir = "countup";
-        dirVotes = DIR_VOTES_NEEDED;
-      } else if (vote) {
-        if (vote === dir) dirVotes += 1;
-        else if (!dir) {
-          dir = vote;
-          dirVotes = 1;
-        } else {
-          // conflicting — require re-agree
-          dir = vote;
-          dirVotes = 1;
-        }
-      }
-
-      if (!dir || dirVotes < DIR_VOTES_NEEDED) return belief;
-
-      const sign = dir === "countdown" ? -1 : 1;
-      return commitSigned(sign * unsigned, wallMs, 0, 0.8, "ocr");
-    },
-    /** True once we have a signed mission clock (explicit T± or motion-locked). */
-    hasLock: () => Boolean(belief && Number.isFinite(belief.tPlusSec)),
-    /**
-     * Coast from last OCR grab-time.
-     * Normal: ~60s (covers whisper + sleep-to-milestone).
-     * Countdown after HUD drop (NASA+ etc.): keep coasting longer so we can
-     * still reach T+0 when the clock vanishes ~T−1–2m (hybrid fallback).
-     */
-    now(wallMs = Date.now()) {
-      if (!belief) return null;
-      const age = wallMs - belief.asOfWallMs;
-      if (belief.stallMs > 8000) {
-        // hold: freeze at last OCR
-        return { ...belief, source: "hold", ageMs: age };
-      }
-      const countingDown =
-        belief.dir === "countdown" ||
-        (Number.isFinite(belief.tPlusSec) && belief.tPlusSec < 0);
-      // HUD often drops ~T−1–2m (NASA+); keep coasting so T+0 is reachable.
-      const coastLimitMs = countingDown ? 240_000 : 60_000;
-      if (age < coastLimitMs && (belief.source === "ocr" || belief.source === "coast")) {
-        const coast = belief.tPlusSec + age / 1000;
-        return {
-          ...belief,
-          tPlusSec: coast,
-          source: "coast",
-          ageMs: age,
-        };
-      }
-      // stale: return last snap without coasting far
-      return { ...belief, source: "stale", ageMs: age };
-    },
-    raw: () => belief,
-  };
-}
-
 async function postSuggest(url, secret, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -550,8 +415,25 @@ async function main() {
     );
     process.exit(1);
   }
-  const script = scriptDoc.script || [];
-  const scriptTPlus = scriptTPlusByAction(scriptDoc);
+  const scriptFull = scriptDoc.script || [];
+  const script = filterScriptByPhase(
+    scriptFull,
+    args.phase,
+    args.ascentMaxTPlusSec,
+  );
+  if (args.phase !== "all" && script.length !== scriptFull.length) {
+    logInfo(
+      `phase=${args.phase} script ${scriptFull.length}→${script.length} ` +
+        `(ascentMaxT+=${args.ascentMaxTPlusSec}s)`,
+    );
+  }
+  if (args.phase !== "all" && script.length === 0) {
+    throw new Error(
+      `phase=${args.phase} left zero milestones (ascentMaxT+=${args.ascentMaxTPlusSec}s)`,
+    );
+  }
+  const scriptTPlus = scriptTPlusByAction({ ...scriptDoc, script });
+  const scriptHasLiftoff = script.some((r) => r?.actionId === "liftoff");
   const phrases = normalizePhraseBook(
     JSON.parse(readFileSync(PHRASES_FALCON, "utf8")),
   );
@@ -736,14 +618,42 @@ async function main() {
       // During hold, only catch-up path after a fresh OCR should fire.
       return;
     }
+    let firedThisPass = 0;
     for (const row of script) {
       if (row?.actionId == null || row.tPlusSec == null) continue;
       if (emitted.has(row.actionId)) continue;
+      // Ascent: do not fire post-liftoff milestones until liftoff itself emits.
+      // (False T+ OCR used to skip overdue liftoff via the +120s late window
+      // and then dump Max-Q→catch — Flight 15.)
+      if (
+        scriptHasLiftoff &&
+        !emitted.has("liftoff") &&
+        row.actionId !== "liftoff" &&
+        Number(row.tPlusSec) > 0
+      ) {
+        continue;
+      }
       const dueAt = Number(row.tPlusSec) - args.leadSec;
       // earlyε 0.35s: fire slightly before due so grab lands on script T+
       if (belief.tPlusSec + 0.35 < dueAt) continue;
-      if (belief.tPlusSec > Number(row.tPlusSec) + 120) continue;
+      // Liftoff gets a wider late window so a brief OCR hole near T+0 still
+      // unlocks the rest of the ascent script.
+      const lateLimitSec = row.actionId === "liftoff" ? 600 : 120;
+      if (belief.tPlusSec > Number(row.tPlusSec) + lateLimitSec) continue;
       const overdue = belief.tPlusSec - dueAt;
+      if (overdue > MAX_CATCHUP_OVERDUE_SEC) {
+        logWarn(
+          `skip ${row.actionId} overdue=${overdue.toFixed(1)}s ` +
+            `(cap ${MAX_CATCHUP_OVERDUE_SEC}s) @ clock ${formatMissionClock(belief.tPlusSec)}`,
+        );
+        continue;
+      }
+      if (firedThisPass >= MAX_CATCHUP_PER_PASS) {
+        logWarn(
+          `catch-up cap ${MAX_CATCHUP_PER_PASS}/pass — deferring ${row.actionId}`,
+        );
+        break;
+      }
       // Precision wake: grab at wall "now". Catch-up / overdue: seek the script
       // T+ frame (OCR may have finished seconds after grabWall).
       const ssNow = !fileMode
@@ -757,6 +667,7 @@ async function main() {
           (overdue > 0.5 ? ` overdue=${overdue.toFixed(1)}s` : ""),
       );
       await emitRow(row, belief, ssNow, ocrSnap);
+      firedThisPass += 1;
     }
   }
 
@@ -1058,6 +969,14 @@ async function main() {
           unsignedSec: ocr.unsignedSec,
           signSource: ocr.signSource,
         });
+        const meta = clock.lastMeta?.() || {};
+        if (meta.rejected) {
+          logWarn(
+            `clock jump rejected (${meta.reason}): ` +
+              `${formatMissionClock(meta.from)} → ${formatMissionClock(meta.to)} ` +
+              `(keeping prior belief)`,
+          );
+        }
         if (b && clock.hasLock()) {
           const stall =
             b.stallMs > 8000 ? ` HOLD~${(b.stallMs / 1000).toFixed(0)}s` : "";

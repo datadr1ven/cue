@@ -31,8 +31,10 @@ declare -A LL2_IDS=(
 mkdir -p "$OUT_DIR" "$RUN_DIR" "$LOG_DIR"
 
 usage() {
-  echo "Usage: $0 start|stop|status [alias|--ll2-id UUID|--mission id]" >&2
+  echo "Usage: $0 start|stop|status [alias|--ll2-id UUID|--mission id] [--phase ascent|return|all]" >&2
   echo "  aliases: ${!LL2_IDS[*]}" >&2
+  echo "  --phase ascent  ascent desk only (cron default for launch day)" >&2
+  echo "  --phase return  next-day deorbit/catch desk (run key …-return)" >&2
   exit 2
 }
 
@@ -47,45 +49,75 @@ is_running() {
   [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null
 }
 
-# Resolve start args → run_key + webcast:live argv fragment
+# Resolve start args → run_key + webcast:live argv fragment.
+# Accepts: start --ll2-id UUID [--phase ascent|return|all]
+#          start --mission id [--phase …]
+#          start <alias> [--phase …]
 resolve_start() {
-  local a="${1:-}"
   RUN_KEY=""
   LIVE_ARGS=()
+  PHASE="all"
+  local positional=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ll2-id)
+        local id="${2:-}"
+        [[ -n "$id" ]] || usage
+        RUN_KEY="ll2-${id:0:8}"
+        LIVE_ARGS+=(--ll2-id "$id")
+        shift 2
+        ;;
+      --mission)
+        local mid="${2:-}"
+        [[ -n "$mid" ]] || usage
+        RUN_KEY="$mid"
+        LIVE_ARGS+=(--mission "$mid")
+        shift 2
+        ;;
+      --phase)
+        PHASE="${2:-all}"
+        shift 2
+        ;;
+      --help|-h) usage ;;
+      *)
+        positional+=("$1")
+        shift
+        ;;
+    esac
+  done
 
-  if [[ -z "$a" ]]; then
+  if [[ -z "$RUN_KEY" && ${#positional[@]} -gt 0 ]]; then
+    local a="${positional[0]}"
+    if [[ -n "${LL2_IDS[$a]:-}" ]]; then
+      RUN_KEY="$a"
+      LIVE_ARGS=(--ll2-id "${LL2_IDS[$a]}")
+      if [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then
+        LIVE_ARGS+=(--mission "$a")
+      fi
+    elif [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then
+      RUN_KEY="$a"
+      LIVE_ARGS=(--mission "$a")
+    else
+      echo "ERROR: unknown start target: $a" >&2
+      usage
+    fi
+  fi
+
+  if [[ -z "$RUN_KEY" ]]; then
     usage
   fi
-  if [[ "$a" == "--ll2-id" ]]; then
-    local id="${2:-}"
-    [[ -n "$id" ]] || usage
-    RUN_KEY="ll2-${id:0:8}"
-    LIVE_ARGS=(--ll2-id "$id")
-    return 0
+
+  case "$PHASE" in
+    ascent|return|all) ;;
+    *)
+      echo "ERROR: --phase must be ascent|return|all (got $PHASE)" >&2
+      exit 2
+      ;;
+  esac
+  LIVE_ARGS+=(--phase "$PHASE")
+  if [[ "$PHASE" == "return" ]]; then
+    RUN_KEY="${RUN_KEY}-return"
   fi
-  if [[ "$a" == "--mission" ]]; then
-    local mid="${2:-}"
-    [[ -n "$mid" ]] || usage
-    RUN_KEY="$mid"
-    LIVE_ARGS=(--mission "$mid")
-    return 0
-  fi
-  if [[ -n "${LL2_IDS[$a]:-}" ]]; then
-    RUN_KEY="$a"
-    LIVE_ARGS=(--ll2-id "${LL2_IDS[$a]}")
-    # Optional file fallback only if we have a committed script JSON
-    if [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then
-      LIVE_ARGS+=(--mission "$a")
-    fi
-    return 0
-  fi
-  if [[ -f "$CUE_ROOT/apps/tplus/missions/flights/${a}-script.json" ]]; then
-    RUN_KEY="$a"
-    LIVE_ARGS=(--mission "$a")
-    return 0
-  fi
-  echo "ERROR: unknown start target: $a" >&2
-  usage
 }
 
 # Pre-start LL2 gate: refresh crontab on slip/cancel; only spawn when "go".
@@ -139,7 +171,8 @@ cmd_start() {
       break
     fi
   done
-  if [[ -n "$ll2_id" ]]; then
+  # Return desk is hours/days after NET; slip/window gates do not apply.
+  if [[ -n "$ll2_id" && "${PHASE:-all}" != "return" ]]; then
     local ec=0
     set +e
     check_start_ll2 "$ll2_id"
@@ -161,6 +194,8 @@ cmd_start() {
       echo "[$RUN_KEY] check-start failed ec=$ec — refusing start" >&2
       return 1
     fi
+  elif [[ "${PHASE:-}" == "return" ]]; then
+    echo "[$RUN_KEY] phase=return — skipping NET/window check-start"
   fi
 
   # Quote-safe: rebuild command string

@@ -22,6 +22,7 @@ import {
   ll2Fetch,
   pickOfficialWebcastUrl,
 } from "../src/missions/ll2.js";
+import { ASCENT_MAX_TPLUS_SEC } from "../src/webcast/clock_belief.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(ROOT, "../..");
@@ -36,6 +37,12 @@ const END = "# END TPLUS-WEBCAST";
 
 const LEAD_MIN = 30;
 const TRAIL_MIN = 30;
+/** Lead before first late (return-phase) milestone for the second desk. */
+const RETURN_LEAD_MIN = Number(process.env.TPLUS_RETURN_LEAD_MIN || 45);
+const RETURN_TRAIL_MIN = Number(process.env.TPLUS_RETURN_TRAIL_MIN || 30);
+const ASCENT_MAX_SEC = Number(
+  process.env.TPLUS_ASCENT_MAX_TPLUS_SEC || ASCENT_MAX_TPLUS_SEC,
+);
 const HORIZON_H = Number(process.env.TPLUS_SCHEDULE_HORIZON_H || 72);
 const MAX_LAUNCHES = Number(process.env.TPLUS_SCHEDULE_MAX || 8);
 
@@ -124,10 +131,8 @@ function considerLaunch(launch, now, horizonH) {
 
   const windowEnd = new Date(launch.window_end || netStr);
   const horizonEnd = addMinutes(now, horizonH * 60);
-  // Allow slight past (scrub slip / still in window)
-  if (windowEnd.getTime() < now.getTime() - 60 * 60 * 1000) {
-    return { ok: false, reason: "window already ended" };
-  }
+  // NET still in the future beyond horizon → skip. Past NET is OK when a
+  // return desk may still be due (Starship ~T+22h).
   if (net.getTime() > horizonEnd.getTime()) {
     return { ok: false, reason: `net beyond ${horizonH}h horizon` };
   }
@@ -160,16 +165,61 @@ function considerLaunch(launch, now, horizonH) {
         tPlusSec: Number(r.tPlusSec),
         actionId: String(r.actionId),
         label: String(r.label || r.actionId),
-      }))
-      .slice(0, 24);
+      }));
   } catch (e) {
     reasons.push(`timeline map failed: ${e.message || e}`);
   }
 
+  const late = milestones.filter((m) => m.tPlusSec > ASCENT_MAX_SEC);
+  const returnStartTPlus = late.length
+    ? Math.min(...late.map((m) => m.tPlusSec))
+    : null;
+  const returnEndTPlus = late.length
+    ? Math.max(...late.map((m) => m.tPlusSec))
+    : null;
+
   const startAt = addMinutes(net, -LEAD_MIN);
-  const stopAt = addMinutes(windowEnd, TRAIL_MIN);
-  if (stopAt <= startAt) {
+  const ascentStopAt = addMinutes(windowEnd, TRAIL_MIN);
+  /** True end of interest: return catch+trail when script is multi-day. */
+  const missionEndAt =
+    returnEndTPlus != null
+      ? addMinutes(net, Math.ceil(returnEndTPlus / 60) + RETURN_TRAIL_MIN)
+      : ascentStopAt;
+
+  // Keep long missions after the launch window if a return desk is still due.
+  if (missionEndAt.getTime() < now.getTime() - 60 * 60 * 1000) {
+    return { ok: false, reason: "mission already ended" };
+  }
+
+  const wantAscent = ascentStopAt.getTime() > now.getTime() - 5 * 60 * 1000;
+  let returnStartAt = null;
+  let returnStopAt = null;
+  if (returnStartTPlus != null && returnEndTPlus != null) {
+    returnStartAt = addMinutes(
+      net,
+      Math.floor(returnStartTPlus / 60) - RETURN_LEAD_MIN,
+    );
+    returnStopAt = addMinutes(
+      net,
+      Math.ceil(returnEndTPlus / 60) + RETURN_TRAIL_MIN,
+    );
+  }
+  const wantReturn =
+    returnStartAt &&
+    returnStopAt &&
+    returnStopAt.getTime() > now.getTime() - 5 * 60 * 1000;
+
+  if (!wantAscent && !wantReturn) {
+    return { ok: false, reason: "no active ascent/return window" };
+  }
+  if (wantAscent && ascentStopAt <= startAt) {
     return { ok: false, reason: "stop <= start" };
+  }
+
+  if (late.length) {
+    reasons.push(
+      `return desk: ${late.length} milestones after T+${ASCENT_MAX_SEC}s`,
+    );
   }
 
   return {
@@ -186,12 +236,22 @@ function considerLaunch(launch, now, horizonH) {
       windowEnd: windowEnd.toISOString(),
       webcastUrl,
       timelineEvents: timeline.length,
-      milestones,
+      milestones: milestones.slice(0, 40),
       runKey: runKeyForId(launch.id),
-      startAt: startAt.toISOString(),
-      stopAt: stopAt.toISOString(),
-      cronStart: toCronLocal(startAt).line,
-      cronStop: toCronLocal(stopAt).line,
+      // Ascent desk (phase=ascent) — omit cron lines when already past.
+      phase: "ascent",
+      startAt: wantAscent ? startAt.toISOString() : null,
+      stopAt: wantAscent ? ascentStopAt.toISOString() : null,
+      cronStart: wantAscent ? toCronLocal(startAt).line : null,
+      cronStop: wantAscent ? toCronLocal(ascentStopAt).line : null,
+      // Optional next-day return desk (Starship-style).
+      returnRunKey: wantReturn ? `${runKeyForId(launch.id)}-return` : null,
+      returnStartAt: wantReturn ? returnStartAt.toISOString() : null,
+      returnStopAt: wantReturn ? returnStopAt.toISOString() : null,
+      returnCronStart: wantReturn ? toCronLocal(returnStartAt).line : null,
+      returnCronStop: wantReturn ? toCronLocal(returnStopAt).line : null,
+      returnStartTPlus,
+      returnEndTPlus,
     },
   };
 }
@@ -199,7 +259,7 @@ function considerLaunch(launch, now, horizonH) {
 function buildCrontabBlock(entries) {
   const lines = [
     BEGIN,
-    `# Regenerated by schedule-from-ll2 · horizon=${HORIZON_H}h · lead=${LEAD_MIN}m trail=${TRAIL_MIN}m`,
+    `# Regenerated by schedule-from-ll2 · horizon=${HORIZON_H}h · lead=${LEAD_MIN}m trail=${TRAIL_MIN}m · returnLead=${RETURN_LEAD_MIN}m ascentMaxT+=${ASCENT_MAX_SEC}s`,
     `# Do not hand-edit inside markers — run: npm run schedule:tplus -w tplus -- --apply-crontab`,
     `SHELL=/bin/bash`,
     `PATH=${REPO}/node_modules/.bin:/usr/local/bin:/usr/bin:/bin`,
@@ -214,12 +274,27 @@ function buildCrontabBlock(entries) {
     lines.push(
       `# ${label} · ${e.lsp || "?"} · NET ${e.net} · ${e.webcastUrl}`,
     );
-    lines.push(
-      `${e.cronStart} ${CTL} start --ll2-id ${e.ll2Id} >> ${CRON_LOG} 2>&1`,
-    );
-    lines.push(
-      `${e.cronStop} ${CTL} stop ${e.runKey} >> ${CRON_LOG} 2>&1`,
-    );
+    if (e.cronStart && e.cronStop) {
+      lines.push(
+        `${e.cronStart} ${CTL} start --ll2-id ${e.ll2Id} --phase ascent >> ${CRON_LOG} 2>&1`,
+      );
+      lines.push(
+        `${e.cronStop} ${CTL} stop ${e.runKey} >> ${CRON_LOG} 2>&1`,
+      );
+    } else {
+      lines.push(`# (ascent desk skipped — window past)`);
+    }
+    if (e.returnCronStart && e.returnCronStop && e.returnRunKey) {
+      lines.push(
+        `# return desk · T+${e.returnStartTPlus}s→T+${e.returnEndTPlus}s · ${e.returnStartAt} → ${e.returnStopAt}`,
+      );
+      lines.push(
+        `${e.returnCronStart} ${CTL} start --ll2-id ${e.ll2Id} --phase return >> ${CRON_LOG} 2>&1`,
+      );
+      lines.push(
+        `${e.returnCronStop} ${CTL} stop ${e.returnRunKey} >> ${CRON_LOG} 2>&1`,
+      );
+    }
     lines.push("");
   }
   if (!entries.length) {
@@ -361,7 +436,10 @@ async function main() {
   if (args.help) {
     console.log(
       `Usage: schedule-from-ll2 [--apply-crontab] [--dry-run] [--horizon-h N]
-       schedule-from-ll2 --check-start <ll2-uuid>`,
+       schedule-from-ll2 --check-start <ll2-uuid>
+
+Long Starship-style scripts (milestones after T+${ASCENT_MAX_SEC}s) also get a
+return desk cron: start --ll2-id … --phase return (separate run key …-return).`,
     );
     process.exit(0);
   }
@@ -425,6 +503,9 @@ async function main() {
     horizonH: args.horizonH,
     leadMin: LEAD_MIN,
     trailMin: TRAIL_MIN,
+    returnLeadMin: RETURN_LEAD_MIN,
+    returnTrailMin: RETURN_TRAIL_MIN,
+    ascentMaxTPlusSec: ASCENT_MAX_SEC,
     launches: selected,
     skipped: skipped.slice(0, 30),
   };
